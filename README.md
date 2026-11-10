@@ -23,9 +23,15 @@ Couch play is isolated from your Steam profile: both windows run with Steam off 
 online co-op runs can never overwrite each other.
 
 Every launch copies your Steam profile's progress, prefs and settings into both folders, so
-both players start with your unlocks, ascension and audio/keybind settings. Nothing flows
-back: couch runs earn no achievements, and unlocks earned in a couch run are reset to your
-Steam profile's on the next launch.
+both players start with your unlocks and audio/keybind settings. Nothing flows back to
+Steam, and couch runs earn no achievements. Card, relic and other unlocks earned in a couch
+run are replaced by your Steam profile's on the next launch.
+
+Co-op ascension is the exception: a couch win at your max co-op ascension unlocks the next
+level, and it is kept. Each launch gives both windows the highest
+`max_multiplayer_ascension` among your Steam profile and the two couch saves, because the
+lobby caps ascension at the lowest max among its players. The lobby's chosen level is kept
+from the host's couch save.
 
 Player names live in `%LOCALAPPDATA%\sts2-couch\mp_names.json`, which the launcher writes.
 Logs: `%APPDATA%\SlayTheSpire2\logs\couch_host.log` and `couch_client.log`.

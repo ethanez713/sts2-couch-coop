@@ -55,12 +55,40 @@ function Get-Layout([int]$slot) {
 
 # Couch runs never touch the Steam profile, so couch and online co-op saves cannot collide.
 # Each window starts from the owner's progress and settings, copied fresh on every launch;
-# nothing earned in a couch run flows back.
+# nothing earned in a couch run flows back. The exception is co-op ascension, which couch
+# runs earn and keep (Merge-CoopAscension).
+function Get-ProgressInt([string]$path, [string]$field) {
+    if (-not (Test-Path $path)) { return $null }
+    $m = [regex]::Match([IO.File]::ReadAllText($path), "`"$field`"\s*:\s*(\d+)")
+    if ($m.Success) { return [int]$m.Groups[1].Value } else { return $null }
+}
+
+# Patched as text rather than round-tripped through ConvertTo-Json, which in PowerShell 5
+# rewrites the rest of this 200 KB file (escaping, number formats) for no reason.
+function Set-ProgressInt([string]$path, [string]$field, [int]$value) {
+    $text = [IO.File]::ReadAllText($path)
+    $text = [regex]::Replace($text, "(`"$field`"\s*:\s*)\d+", "`${1}$value")
+    [IO.File]::WriteAllText($path, $text)
+}
+
+# The lobby caps ascension at the lowest max among its players, so both windows get the
+# same value: the highest the Steam profile or either couch save has reached.
+function Merge-CoopAscension([string[]]$couchProgress, [string]$steamProgress) {
+    $sources = @($steamProgress) + $couchProgress
+    $max = ($sources | ForEach-Object { Get-ProgressInt $_ "max_multiplayer_ascension" } | Measure-Object -Maximum).Maximum
+    $preferred = Get-ProgressInt $couchProgress[0] "preferred_multiplayer_ascension"
+    if ($null -eq $preferred) { $preferred = Get-ProgressInt $steamProgress "preferred_multiplayer_ascension" }
+    if ($null -eq $max) { return }
+    return @{ max = [int]$max; preferred = [Math]::Min([int]$preferred, [int]$max) }
+}
 $steamAccount = Get-ChildItem (Join-Path $userData "steam") -Directory -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if (-not $steamAccount) { throw "No Steam save folder under $userData\steam. Run the game through Steam once first." }
 $profileId = (Get-Content (Join-Path $steamAccount.FullName "profile.save") -Raw | ConvertFrom-Json).last_profile_id
 $steamSaves = Join-Path $steamAccount.FullName "profile$profileId\saves"
+
+$couchProgress = @($players | ForEach-Object { Join-Path $userData "default\$($_.Id)\profile1\saves\progress.save" })
+$coopAscension = Merge-CoopAscension $couchProgress (Join-Path $steamSaves "progress.save")
 
 for ($slot = 0; $slot -lt $players.Count; $slot++) {
     $folder = Join-Path $userData "default\$($players[$slot].Id)"
@@ -69,6 +97,10 @@ for ($slot = 0; $slot -lt $players.Count; $slot++) {
     foreach ($file in "progress.save", "prefs.save") {
         $source = Join-Path $steamSaves $file
         if (Test-Path $source) { Copy-Item $source (Join-Path $saves $file) -Force }
+    }
+    if ($coopAscension) {
+        Set-ProgressInt $couchProgress[$slot] "max_multiplayer_ascension" $coopAscension.max
+        Set-ProgressInt $couchProgress[$slot] "preferred_multiplayer_ascension" $coopAscension.preferred
     }
     $settings = Get-Content (Join-Path $steamAccount.FullName "settings.save") -Raw | ConvertFrom-Json
     $layout = Get-Layout $slot
