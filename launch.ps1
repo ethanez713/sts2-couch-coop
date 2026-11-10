@@ -9,6 +9,11 @@ if (Get-Process -Name SlayTheSpire2 -ErrorAction SilentlyContinue) {
     throw "Slay the Spire 2 is already running. Close it first; the host needs port 33771 free."
 }
 
+# Screen geometry must be in physical pixels, which is what the game's window settings use.
+Add-Type -Name User32 -Namespace Couch -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetProcessDPIAware();'
+[void][Couch.User32]::SetProcessDPIAware()
+Add-Type -AssemblyName System.Windows.Forms
+
 $exe = Join-Path $GameDir "SlayTheSpire2.exe"
 $userData = Join-Path $env:APPDATA "SlayTheSpire2"
 $logDir = Join-Path $userData "logs"
@@ -16,48 +21,72 @@ $workDir = Join-Path $env:LOCALAPPDATA "sts2-couch"
 New-Item -ItemType Directory -Force -Path $logDir, $workDir | Out-Null
 
 # Net ids are fixed by the game's developer mode: host is 1, clients are 1000, 2000, 3000.
-$clientId = 1000
+# With Steam off, each id gets its own save folder, user://default/<id>.
+$players = @(
+    @{ Id = 1;    Name = $Player1; Log = "couch_host.log" },
+    @{ Id = 1000; Name = $Player2; Log = "couch_client.log" }
+)
 
 # The game reads display names from ./mp_names.json in its working directory.
 # WriteAllText, not Set-Content: Windows PowerShell 5 prepends a BOM that the game's JSON
 # parser rejects.
-$namesJson = @(
-    @{ net_id = 1; name = $Player1 },
-    @{ net_id = $clientId; name = $Player2 }
-) | ConvertTo-Json
+$namesJson = ConvertTo-Json @($players | ForEach-Object { @{ net_id = $_.Id; name = $_.Name } })
 [IO.File]::WriteAllText((Join-Path $workDir "mp_names.json"), $namesJson)
 
-# The client runs without Steam, so it starts from an empty profile: locked characters and
-# a max ascension of 0, which also drags the lobby's ascension down. Mirror the host's
-# progress into it on every launch so both players have the owner's unlocks.
-$steamAccount = Get-ChildItem (Join-Path $userData "steam") -Directory |
-    Sort-Object LastWriteTime -Descending | Select-Object -First 1
-if ($steamAccount) {
-    $profileId = (Get-Content (Join-Path $steamAccount.FullName "profile.save") -Raw | ConvertFrom-Json).last_profile_id
-    $hostProgress = Join-Path $steamAccount.FullName "profile$profileId\saves\progress.save"
-    $clientSaves = Join-Path $userData "default\$clientId\profile1\saves"
-    if (Test-Path $hostProgress) {
-        New-Item -ItemType Directory -Force -Path $clientSaves | Out-Null
-        Copy-Item $hostProgress (Join-Path $clientSaves "progress.save") -Force
+$screens = [System.Windows.Forms.Screen]::AllScreens
+$primary = [array]::IndexOf($screens, [System.Windows.Forms.Screen]::PrimaryScreen)
+
+function Get-Layout([int]$slot) {
+    if ($screens.Count -ge 2) {
+        $display = if ($slot -eq 0) { $primary } else { @(0..($screens.Count - 1) | Where-Object { $_ -ne $primary })[0] }
+        return @{ fullscreen = $true; target_display = $display; window_position = @{ X = -1; Y = -1 }; window_size = @{ X = 1920; Y = 1080 } }
+    }
+    # One screen: two windows side by side. Position is relative to the display and excludes
+    # the title bar, so leave room for it above the window.
+    $work = $screens[0].WorkingArea
+    $titleBar = [System.Windows.Forms.SystemInformation]::CaptionHeight + 2 * [System.Windows.Forms.SystemInformation]::FrameBorderSize.Height
+    $width = [int]($work.Width / 2)
+    return @{
+        fullscreen = $false; target_display = 0
+        window_position = @{ X = $work.X + $slot * $width; Y = $work.Y + $titleBar }
+        window_size = @{ X = $width; Y = $work.Height - $titleBar }
     }
 }
 
+# Couch runs never touch the Steam profile, so couch and online co-op saves cannot collide.
+# Each window starts from the owner's progress and settings, copied fresh on every launch;
+# nothing earned in a couch run flows back.
+$steamAccount = Get-ChildItem (Join-Path $userData "steam") -Directory -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if (-not $steamAccount) { throw "No Steam save folder under $userData\steam. Run the game through Steam once first." }
+$profileId = (Get-Content (Join-Path $steamAccount.FullName "profile.save") -Raw | ConvertFrom-Json).last_profile_id
+$steamSaves = Join-Path $steamAccount.FullName "profile$profileId\saves"
+
+for ($slot = 0; $slot -lt $players.Count; $slot++) {
+    $folder = Join-Path $userData "default\$($players[$slot].Id)"
+    $saves = Join-Path $folder "profile1\saves"
+    New-Item -ItemType Directory -Force -Path $saves | Out-Null
+    foreach ($file in "progress.save", "prefs.save") {
+        $source = Join-Path $steamSaves $file
+        if (Test-Path $source) { Copy-Item $source (Join-Path $saves $file) -Force }
+    }
+    $settings = Get-Content (Join-Path $steamAccount.FullName "settings.save") -Raw | ConvertFrom-Json
+    $layout = Get-Layout $slot
+    foreach ($key in $layout.Keys) { $settings.$key = $layout[$key] }
+    [IO.File]::WriteAllText((Join-Path $folder "settings.save"), (ConvertTo-Json $settings -Depth 10))
+}
+
 # --fastmp is the game's own loopback mode: ENet on 127.0.0.1:33771 instead of Steam
-# networking. Only the host talks to Steam (saves, cloud, achievements); the client runs
-# with Steam off so it writes to its own save folder instead of racing the host's files.
-# A bare --fastmp opens the multiplayer menu (Host, or Load when a co-op save exists).
-# Don't use "--fastmp load": it looks the host up by Steam id, but co-op saves record net
-# id 1, so validation fails and the game renames the save as broken.
-$hostArgs = @("--fastmp", "--log-file", (Join-Path $logDir "couch_host.log"))
-$clientArgs = @("--force-steam", "off", "--fastmp", "join", "--clientId", "$clientId",
-                "--log-file", (Join-Path $logDir "couch_client.log"))
+# networking. Both windows run with Steam off (see above). The host resumes the couch run
+# if one is saved, otherwise opens character select for a new standard run.
+$hostSave = Join-Path $userData "default\1\profile1\saves\current_run_mp.save"
+$hostMode = if (Test-Path $hostSave) { "load" } else { "host_standard" }
 
-# Launching the exe directly (not through Steam) needs the app id in the environment,
-# or SteamAPI init fails and the game quits.
-$env:SteamAppId = "2868840"
-Start-Process -FilePath $exe -WorkingDirectory $workDir -ArgumentList $hostArgs
-Remove-Item Env:SteamAppId
-
-# The client's join times out after 10 s, so the host must be listening first.
-Start-Sleep -Seconds 12
-Start-Process -FilePath $exe -WorkingDirectory $workDir -ArgumentList $clientArgs
+foreach ($slot in 0..($players.Count - 1)) {
+    $p = $players[$slot]
+    $gameArgs = @("--force-steam", "off", "--clientId", "$($p.Id)", "--log-file", (Join-Path $logDir $p.Log),
+                  "--fastmp", $(if ($slot -eq 0) { $hostMode } else { "join" }))
+    Start-Process -FilePath $exe -WorkingDirectory $workDir -ArgumentList $gameArgs
+    # A client's join times out after 10 s, so the host must be listening first.
+    if ($slot -eq 0) { Start-Sleep -Seconds 12 }
+}
