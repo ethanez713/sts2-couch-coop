@@ -1,0 +1,11 @@
+{
+  "id": "CouchCoop",
+  "name": "Couch Co-op",
+  "author": "sts2-couch",
+  "description": "Same-room co-op tweaks for the couch launcher: no remote cursors, single-pick map travel, End turn for All.",
+  "version": "0.1.0",
+  "has_pck": false,
+  "has_dll": true,
+  "affects_gameplay": true,
+  "min_game_version": "0.107.1"
+}

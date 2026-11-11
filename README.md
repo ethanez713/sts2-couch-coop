@@ -1,8 +1,15 @@
 # Slay the Spire 2 couch co-op
 
 Two players on one Windows PC, each with their own game window, linked over the game's
-built-in developer loopback mode (`--fastmp`, ENet on `127.0.0.1:33771`). No game files are
-modified and no mod DLL is loaded.
+built-in developer loopback mode (`--fastmp`, ENet on `127.0.0.1:33771`). A small mod
+(`mod/`) tunes co-op for players sitting in the same room.
+
+## Setup
+
+1. Build the couch mod once, and again after changing it: in WSL,
+   `cd ~/sts2_multi/mod && dotnet build -c Release` (.NET 9 SDK).
+2. For touch controls, subscribe to [Touch-STS2](https://steamcommunity.com/sharedfiles/filedetails/?id=3804990566)
+   on the Steam Workshop, then turn on **Touchscreen mode** in the game's input settings.
 
 ## Play
 
@@ -13,14 +20,22 @@ Double-click `couch-coop.bat`, or run it with names: `couch-coop.bat -Player1 Et
 - **Host window** (player 1) opens character select for a new run, or the resume lobby if a
   couch run is saved. To start over instead, abandon from the pause menu inside the run.
 - **Client window** (player 2) joins the host automatically about 20 s after launch.
-- **Mouse:** whoever holds it plays; clicking a window focuses it. Only the focused window
-  plays sound.
+- **Mouse or touch:** clicking or tapping a window focuses it. Only the focused window plays
+  sound.
+
+## Couch mod
+
+The launcher copies the couch mod, and Touch-STS2 when it is downloaded, into the game's
+`mods` folder and enables mods for the couch windows only. Normal Steam play leaves them
+off, and the couch mod does nothing outside a `--fastmp` session.
+
+- **No remote cursors:** everyone can see every screen, so the other players' cursors are hidden.
 
 ## Saves
 
 Couch play is isolated from your Steam profile: both windows run with Steam off and save to
-`%APPDATA%\SlayTheSpire2\default\1\` (host) and `default\1000\` (client). So couch runs and
-online co-op runs can never overwrite each other.
+`%APPDATA%\SlayTheSpire2\default\1\modded\` (host) and `default\1000\modded\` (client).
+So couch runs and online co-op runs can never overwrite each other.
 
 Every launch copies your Steam profile's progress, prefs and settings into both folders, so
 both players start with your unlocks and audio/keybind settings. Nothing flows back to
@@ -39,4 +54,4 @@ Logs: `%APPDATA%\SlayTheSpire2\logs\couch_host.log` and `couch_client.log`.
 ## Limits
 
 - Two players. The game's dev mode reserves client ids 2000 and 3000 for players 3–4.
-- One shared mouse; a controller follows whichever window has focus.
+- A controller follows whichever window has focus.

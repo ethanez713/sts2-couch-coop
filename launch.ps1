@@ -15,13 +15,38 @@ Add-Type -Name User32 -Namespace Couch -MemberDefinition '[DllImport("user32.dll
 Add-Type -AssemblyName System.Windows.Forms
 
 $exe = Join-Path $GameDir "SlayTheSpire2.exe"
+$steamApps = Split-Path (Split-Path $GameDir)
 $userData = Join-Path $env:APPDATA "SlayTheSpire2"
 $logDir = Join-Path $userData "logs"
 $workDir = Join-Path $env:LOCALAPPDATA "sts2-couch"
 New-Item -ItemType Directory -Force -Path $logDir, $workDir | Out-Null
 
+# The game loads mods from a folder next to its exe. Couch windows run with Steam off, so
+# Workshop items are not read from Steam; they are copied in like local mods. Normal Steam
+# play does not load these: mods stay off there until enabled in its own settings.
+$modsDir = Join-Path $GameDir "mods"
+$couchMod = Join-Path $PSScriptRoot "mod\bin\CouchCoop"
+if (-not (Test-Path (Join-Path $couchMod "CouchCoop.dll"))) {
+    throw "Couch mod not built. In WSL run: cd ~/sts2_multi/mod && dotnet build -c Release"
+}
+$workshopMods = @{ "3804990566" = "TouchSts2" }
+
+function Copy-Mod([string]$from, [string]$name) {
+    $to = Join-Path $modsDir $name
+    if (Test-Path $to) { Remove-Item -Recurse -Force $to }
+    New-Item -ItemType Directory -Force -Path $to | Out-Null
+    Copy-Item -Recurse -Force (Join-Path $from "*") $to
+}
+Copy-Mod $couchMod "CouchCoop"
+foreach ($item in $workshopMods.Keys) {
+    $from = Join-Path $steamApps "workshop\content\2868840\$item"
+    if (Test-Path $from) { Copy-Mod $from $workshopMods[$item] }
+    else { Write-Warning "Workshop item $item ($($workshopMods[$item])) is not downloaded; subscribe to it in Steam." }
+}
+
 # Net ids are fixed by the game's developer mode: host is 1, clients are 1000, 2000, 3000.
-# With Steam off, each id gets its own save folder, user://default/<id>.
+# With Steam off, each id gets its own save folder, user://default/<id>; with mods loaded the
+# game keeps profiles under modded/.
 $players = @(
     @{ Id = 1;    Name = $Player1; Log = "couch_host.log" },
     @{ Id = 1000; Name = $Player2; Log = "couch_client.log" }
@@ -87,12 +112,13 @@ if (-not $steamAccount) { throw "No Steam save folder under $userData\steam. Run
 $profileId = (Get-Content (Join-Path $steamAccount.FullName "profile.save") -Raw | ConvertFrom-Json).last_profile_id
 $steamSaves = Join-Path $steamAccount.FullName "profile$profileId\saves"
 
-$couchProgress = @($players | ForEach-Object { Join-Path $userData "default\$($_.Id)\profile1\saves\progress.save" })
+$couchProfile = "modded\profile1"
+$couchProgress = @($players | ForEach-Object { Join-Path $userData "default\$($_.Id)\$couchProfile\saves\progress.save" })
 $coopAscension = Merge-CoopAscension $couchProgress (Join-Path $steamSaves "progress.save")
 
 for ($slot = 0; $slot -lt $players.Count; $slot++) {
     $folder = Join-Path $userData "default\$($players[$slot].Id)"
-    $saves = Join-Path $folder "profile1\saves"
+    $saves = Join-Path $folder "$couchProfile\saves"
     New-Item -ItemType Directory -Force -Path $saves | Out-Null
     foreach ($file in "progress.save", "prefs.save") {
         $source = Join-Path $steamSaves $file
@@ -107,14 +133,15 @@ for ($slot = 0; $slot -lt $players.Count; $slot++) {
     # The game caps an unfocused window at 30 FPS unless it is in a multiplayer session, but it
     # decides when focus is lost: the window that loses focus on the main menu stays capped.
     $layout.limit_fps_in_background = $false
-    foreach ($key in $layout.Keys) { $settings.$key = $layout[$key] }
+    $layout.mod_settings = @{ mods_enabled = $true; mod_list = @() }
+    foreach ($key in $layout.Keys) { $settings | Add-Member -Force -NotePropertyName $key -NotePropertyValue $layout[$key] }
     [IO.File]::WriteAllText((Join-Path $folder "settings.save"), (ConvertTo-Json $settings -Depth 10))
 }
 
 # --fastmp is the game's own loopback mode: ENet on 127.0.0.1:33771 instead of Steam
 # networking. Both windows run with Steam off (see above). The host resumes the couch run
 # if one is saved, otherwise opens character select for a new standard run.
-$hostSave = Join-Path $userData "default\1\profile1\saves\current_run_mp.save"
+$hostSave = Join-Path $userData "default\1\$couchProfile\saves\current_run_mp.save"
 $hostMode = if (Test-Path $hostSave) { "load" } else { "host_standard" }
 
 foreach ($slot in 0..($players.Count - 1)) {
