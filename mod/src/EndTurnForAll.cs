@@ -16,7 +16,7 @@ using MegaCrit.Sts2.Core.Nodes.Rooms;
 
 namespace CouchCoop;
 
-// An "End turn for All" button beside Ping. Each couch window is its own game process and the
+// An "End Turn for All" button beside Ping. Each couch window is its own game process and the
 // game only lets a player end their own turn, so the button asks the other windows over
 // localhost UDP to press their own End Turn.
 static class EndTurnForAll
@@ -97,7 +97,7 @@ static class EndTurnForAll
 [HarmonyPatch(typeof(NPingButton))]
 static class EndTurnForAllButton
 {
-    const string Label = "End turn for All";
+    const string Label = "End Turn for All";
     // Ping's art is 150 px wide; the longer label needs a wider banner beside it.
     const float Width = 240;
     const float Gap = 8;

@@ -35,7 +35,7 @@ off, and the couch mod does nothing outside a `--fastmp` session.
 - **Touch and mouse at once:** touch doesn't move the mouse cursor or take focus, so one
   player can tap while another uses the mouse. Focus, and with it sound, stays with the
   window last clicked.
-- **End turn for All:** after you end your turn, a button beside Ping ends everyone else's turn too.
+- **End Turn for All:** after you end your turn, a button beside Ping ends everyone else's turn too.
 
 ## Saves
 
