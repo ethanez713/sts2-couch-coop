@@ -32,6 +32,7 @@ off, and the couch mod does nothing outside a `--fastmp` session.
 - **No remote cursors:** everyone can see every screen, so the other players' cursors are hidden.
 - **Single-pick map:** one player's pick decides the next room, with no vote. The party
   travels once every player has the map open; until then the latest pick wins.
+- **End turn for All:** after you end your turn, a button beside Ping ends everyone else's turn too.
 
 ## Saves
 
