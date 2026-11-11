@@ -26,6 +26,11 @@ static class TouchWithoutCursor
     const int PT_TOUCH = 2;
     const uint POINTER_FLAG_CANCELED = 0x8000;
     const int GWLP_WNDPROC = -4;
+    const int GWL_EXSTYLE = -20;
+    const long WS_EX_NOACTIVATE = 0x08000000;
+    const long WS_EX_APPWINDOW = 0x00040000;
+    const uint WM_MOUSEACTIVATE = 0x0021;
+    const uint WM_STYLECHANGING = 0x007C;
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     delegate IntPtr WndProc(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
@@ -41,6 +46,15 @@ static class TouchWithoutCursor
 
     [DllImport("user32.dll")]
     static extern bool ScreenToClient(IntPtr hwnd, ref Point point);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
+
+    [DllImport("user32.dll")]
+    static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    static extern bool SetForegroundWindow(IntPtr hwnd);
 
     [StructLayout(LayoutKind.Sequential)]
     struct Point { public int X, Y; }
@@ -60,6 +74,11 @@ static class TouchWithoutCursor
         var hwnd = (IntPtr)DisplayServer.WindowGetNativeHandle(DisplayServer.HandleType.WindowHandle);
         _hook = Hook;
         _godotProc = SetWindowLongPtr(hwnd, GWLP_WNDPROC, Marshal.GetFunctionPointerForDelegate(_hook));
+        // Telling Windows a touch shouldn't activate this window still takes the foreground from
+        // the other window and leaves no window focused; the no-activate style, as the on-screen
+        // keyboard uses, leaves the foreground alone. App-window keeps the taskbar button.
+        long style = (long)GetWindowLongPtr(hwnd, GWL_EXSTYLE);
+        SetWindowLongPtr(hwnd, GWL_EXSTYLE, (IntPtr)(style | WS_EX_NOACTIVATE | WS_EX_APPWINDOW));
         Log.Info(_godotProc == IntPtr.Zero
             ? $"[CouchCoop] could not hook window {hwnd} for touch: error {Marshal.GetLastPInvokeError()}"
             : "[CouchCoop] touch no longer moves the mouse cursor");
@@ -78,10 +97,23 @@ static class TouchWithoutCursor
             {
                 Log.Error($"[CouchCoop] touch message {msg:X} failed: {e.Message}");
             }
-            // A touch never takes focus, so it can't pull focus from a mouse drag in the other window.
             return msg == WM_POINTERACTIVATE ? PA_NOACTIVATE : IntPtr.Zero;
         }
-        return CallWindowProc(_godotProc, hwnd, msg, wParam, lParam);
+        // Godot rewrites the window style whenever the window moves or resizes.
+        if (msg == WM_STYLECHANGING && (int)wParam == GWL_EXSTYLE)
+        {
+            // STYLESTRUCT { DWORD styleOld; DWORD styleNew; }
+            int styleNew = Marshal.ReadInt32(lParam, 4);
+            Marshal.WriteInt32(lParam, 4, styleNew | (int)WS_EX_NOACTIVATE);
+        }
+        IntPtr result = CallWindowProc(_godotProc, hwnd, msg, wParam, lParam);
+        // Touch never reaches here as mouse input, so this is a real mouse click, which should
+        // still focus its window despite the no-activate style.
+        if (msg == WM_MOUSEACTIVATE && GetForegroundWindow() != hwnd)
+        {
+            SetForegroundWindow(hwnd);
+        }
+        return result;
     }
 
     static uint PointerId(IntPtr wParam) => (uint)((ulong)wParam & 0xFFFF);
