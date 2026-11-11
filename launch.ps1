@@ -104,6 +104,9 @@ for ($slot = 0; $slot -lt $players.Count; $slot++) {
     }
     $settings = Get-Content (Join-Path $steamAccount.FullName "settings.save") -Raw | ConvertFrom-Json
     $layout = Get-Layout $slot
+    # The game caps an unfocused window at 30 FPS unless it is in a multiplayer session, but it
+    # decides when focus is lost: the window that loses focus on the main menu stays capped.
+    $layout.limit_fps_in_background = $false
     foreach ($key in $layout.Keys) { $settings.$key = $layout[$key] }
     [IO.File]::WriteAllText((Join-Path $folder "settings.save"), (ConvertTo-Json $settings -Depth 10))
 }
