@@ -20,10 +20,15 @@ public static class CouchMod
             Log.Info("[CouchCoop] not a --fastmp session; patches not applied");
             return;
         }
+        SeatPointer.Configure();
         new Harmony("sts2-couch.CouchCoop").PatchAll(typeof(CouchMod).Assembly);
         EndTurnForAll.StartListening();
-        Callable.From(TouchWithoutCursor.Install).CallDeferred();
+        Callable.From(CouchWindow.Install).CallDeferred();
         Callable.From(WindowOwnPointer.Install).CallDeferred();
+        if (SeatPointer.Active)
+        {
+            Callable.From(SoftwareCursor.AdoptGameCursor).CallDeferred();
+        }
         Log.Info("[CouchCoop] patches applied");
     }
 }

@@ -7,13 +7,15 @@ using MegaCrit.Sts2.Core.Logging;
 
 namespace CouchCoop;
 
-// Lets one player use touch while another uses the mouse. Godot reads touch through WM_TOUCH,
+// The couch window's message hook. With one device per window (SeatPointer), it feeds this
+// window only its own device's raw input. Otherwise it lets one player use touch while another
+// uses the mouse. Godot reads touch through WM_TOUCH,
 // and Windows turns every touch into mouse input too, which jumps the shared system cursor
 // away from the mouse player. Touch pointer messages are handled here and never reach
 // DefWindowProc, the step that promotes them to mouse input
 // (https://devblogs.microsoft.com/oldnewthing/20210728-00/?p=105487). Godot then gets the
 // touches as screen-touch events, and its own touch-to-mouse emulation drives the game.
-static class TouchWithoutCursor
+static class CouchWindow
 {
     const uint WM_POINTERUPDATE = 0x0245;
     const uint WM_POINTERDOWN = 0x0246;
@@ -31,12 +33,17 @@ static class TouchWithoutCursor
     const long WS_EX_APPWINDOW = 0x00040000;
     const uint WM_MOUSEACTIVATE = 0x0021;
     const uint WM_STYLECHANGING = 0x007C;
+    const uint WM_INPUT = 0x00FF;
+    const uint WM_MOUSEHOVER = 0x02A1;
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     delegate IntPtr WndProc(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
     static extern IntPtr SetWindowLongPtr(IntPtr hwnd, int index, IntPtr value);
+
+    [DllImport("user32.dll", EntryPoint = "DefWindowProcW")]
+    static extern IntPtr DefWindowProc(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll", EntryPoint = "CallWindowProcW")]
     static extern IntPtr CallWindowProc(IntPtr previous, IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
@@ -79,13 +86,30 @@ static class TouchWithoutCursor
         // keyboard uses, leaves the foreground alone. App-window keeps the taskbar button.
         long style = (long)GetWindowLongPtr(hwnd, GWL_EXSTYLE);
         SetWindowLongPtr(hwnd, GWL_EXSTYLE, (IntPtr)(style | WS_EX_NOACTIVATE | WS_EX_APPWINDOW));
-        Log.Info(_godotProc == IntPtr.Zero
-            ? $"[CouchCoop] could not hook window {hwnd} for touch: error {Marshal.GetLastPInvokeError()}"
-            : "[CouchCoop] touch no longer moves the mouse cursor");
+        if (_godotProc == IntPtr.Zero)
+        {
+            Log.Error($"[CouchCoop] could not hook window {hwnd}: error {Marshal.GetLastPInvokeError()}");
+            return;
+        }
+        if (SeatPointer.Active)
+        {
+            SeatPointer.Install(hwnd);
+        }
+        else
+        {
+            Log.Info("[CouchCoop] touch no longer moves the mouse cursor");
+        }
     }
+
+    public static IntPtr CallGodot(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam) =>
+        CallWindowProc(_godotProc, hwnd, msg, wParam, lParam);
 
     static IntPtr Hook(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam)
     {
+        if (SeatPointer.Active && OwnDeviceOnly(hwnd, msg, wParam, lParam) is { } handled)
+        {
+            return handled;
+        }
         if (msg is >= WM_POINTERUPDATE and <= WM_POINTERCAPTURECHANGED
             && GetPointerType(PointerId(wParam), out int type) && type == PT_TOUCH)
         {
@@ -123,6 +147,34 @@ static class TouchWithoutCursor
             SetForegroundWindow(hwnd);
         }
         return result;
+    }
+
+    // With one device per window, this window's pointer comes only from its device's raw input;
+    // the system cursor's messages (driven by every device) and touches are dropped.
+    static IntPtr? OwnDeviceOnly(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam)
+    {
+        if (msg == WM_INPUT)
+        {
+            try
+            {
+                SeatPointer.OnRawInput(lParam);
+            }
+            catch (Exception e)
+            {
+                Log.Error($"[CouchCoop] raw input failed: {e.Message}");
+            }
+            return DefWindowProc(hwnd, msg, wParam, lParam);
+        }
+        if (IsMouseMessage(msg) || msg == WM_MOUSEHOVER)
+        {
+            return IntPtr.Zero;
+        }
+        if (msg is >= WM_POINTERUPDATE and <= WM_POINTERCAPTURECHANGED
+            && GetPointerType(PointerId(wParam), out int type) && type == PT_TOUCH)
+        {
+            return msg == WM_POINTERACTIVATE ? PA_NOACTIVATE : IntPtr.Zero;
+        }
+        return null;
     }
 
     static bool IsMouseMessage(uint msg) => msg is >= 0x0200 and <= 0x020E or 0x02A3;

@@ -27,6 +27,8 @@ static class WindowOwnPointer
         typeof(MegaCrit.Sts2.Core.Nodes.Screens.Map.NMouseHeldMapDrawingInput),
         typeof(MegaCrit.Sts2.Core.Nodes.Vfx.NFollowCursor),
         typeof(MegaCrit.Sts2.Core.Nodes.CommonUi.NControllerManager),
+        typeof(MegaCrit.Sts2.Core.Nodes.CommonUi.NCursorManager),
+        typeof(MegaCrit.Sts2.Core.Nodes.CommonUi.NDropdownScrollbar),
     };
 
     // Optional mods, loaded only in some setups.
@@ -42,10 +44,18 @@ static class WindowOwnPointer
             AccessTools.Method(typeof(WindowOwnPointer), nameof(WarpViewportMouse)),
         [AccessTools.Method(typeof(Input), nameof(Input.WarpMouse))] =
             AccessTools.Method(typeof(WindowOwnPointer), nameof(WarpMouse)),
+        [AccessTools.Method(typeof(DisplayServer), nameof(DisplayServer.MouseGetPosition))] =
+            AccessTools.Method(typeof(WindowOwnPointer), nameof(ScreenMousePosition)),
+        [AccessTools.PropertyGetter(typeof(Input), nameof(Input.MouseMode))] =
+            AccessTools.Method(typeof(SoftwareCursor), nameof(SoftwareCursor.GetMouseMode)),
+        [AccessTools.PropertySetter(typeof(Input), nameof(Input.MouseMode))] =
+            AccessTools.Method(typeof(SoftwareCursor), nameof(SoftwareCursor.SetMouseMode)),
+        [AccessTools.Method(typeof(Input), nameof(Input.SetCustomMouseCursor))] =
+            AccessTools.Method(typeof(SoftwareCursor), nameof(SoftwareCursor.SetCustomMouseCursor)),
     };
 
     // In window pixels: the last real mouse or touch position this window received, or where
-    // the game last warped it. Set by TouchWithoutCursor's window hook.
+    // the game last warped it. Set by CouchWindow's hook.
     public static Vector2 Pointer;
 
     // Runs after every mod has loaded, so Touch-STS2's types resolve.
@@ -71,6 +81,16 @@ static class WindowOwnPointer
             {
                 Log.Error($"[CouchCoop] pointer: could not rewrite {method.DeclaringType?.Name}.{method.Name}: {e.Message}");
             }
+        }
+        // Hotkeys may be bound to mouse buttons, which here reach a window that isn't focused.
+        try
+        {
+            MethodInfo hotkeys = AccessTools.Method(typeof(MegaCrit.Sts2.Core.Nodes.CommonUi.NHotkeyManager), "_UnhandledInput");
+            harmony.Patch(hotkeys, transpiler: new HarmonyMethod(AccessTools.Method(typeof(WindowOwnPointer), nameof(RewriteFocusCheck))));
+        }
+        catch (Exception e)
+        {
+            Log.Error($"[CouchCoop] pointer: could not rewrite the hotkey focus check: {e.Message}");
         }
         Log.Info($"[CouchCoop] each window keeps its own pointer ({patched} call sites rewritten)");
     }
@@ -109,6 +129,22 @@ static class WindowOwnPointer
         }
     }
 
+    static IEnumerable<CodeInstruction> RewriteFocusCheck(IEnumerable<CodeInstruction> instructions)
+    {
+        MethodInfo focused = AccessTools.Method(typeof(MegaCrit.Sts2.Core.Nodes.NGame), nameof(MegaCrit.Sts2.Core.Nodes.NGame.IsGameFocusedWindow));
+        foreach (CodeInstruction instruction in instructions)
+        {
+            if (instruction.operand is MethodInfo called && called == focused)
+            {
+                instruction.operand = AccessTools.Method(typeof(WindowOwnPointer), nameof(IsGameFocusedWindow));
+            }
+            yield return instruction;
+        }
+    }
+
+    public static bool IsGameFocusedWindow() =>
+        SeatPointer.Active ? SeatPointer.CouchWindowInFront() : MegaCrit.Sts2.Core.Nodes.NGame.IsGameFocusedWindow();
+
     static IEnumerable<CodeInstruction> Rewrite(IEnumerable<CodeInstruction> instructions)
     {
         foreach (CodeInstruction instruction in instructions)
@@ -142,5 +178,19 @@ static class WindowOwnPointer
         WarpMouse(viewport.GetScreenTransform() * position);
     }
 
-    public static void WarpMouse(Vector2 windowPosition) => Pointer = windowPosition;
+    public static void WarpMouse(Vector2 windowPosition)
+    {
+        if (SeatPointer.Active)
+        {
+            SeatPointer.WarpTo(windowPosition);
+        }
+        else
+        {
+            Pointer = windowPosition;
+        }
+    }
+
+    public static Vector2I ScreenMousePosition() => SeatPointer.Active
+        ? DisplayServer.WindowGetPosition() + (Vector2I)Pointer
+        : DisplayServer.MouseGetPosition();
 }

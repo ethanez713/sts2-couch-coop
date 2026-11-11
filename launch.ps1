@@ -1,6 +1,14 @@
 param(
     [string]$Player1 = "Player 1",
     [string]$Player2 = "Player 2",
+    # mice: each window follows its own pointing device (Pointer1 for the host, Pointer2 for the
+    # client): "touchpad", "mouse" (any non-touchpad), or text from the device's path.
+    # touch: one shared mouse plus the touchscreen, with the Touch-STS2 mod.
+    [ValidateSet("mice", "touch")] [string]$InputMode = "touch",
+    [string]$Pointer1 = "touchpad",
+    [string]$Pointer2 = "mouse",
+    [double]$Speed1 = 1.0,
+    [double]$Speed2 = 1.0,
     [string]$GameDir = "C:\Program Files (x86)\Steam\steamapps\common\Slay the Spire 2"
 )
 $ErrorActionPreference = "Stop"
@@ -40,7 +48,9 @@ function Copy-Mod([string]$from, [string]$name) {
 Copy-Mod $couchMod "CouchCoop"
 foreach ($item in $workshopMods.Keys) {
     $from = Join-Path $steamApps "workshop\content\2868840\$item"
-    if (Test-Path $from) { Copy-Mod $from $workshopMods[$item] }
+    $to = Join-Path $modsDir $workshopMods[$item]
+    if ($InputMode -ne "touch") { if (Test-Path $to) { Remove-Item -Recurse -Force $to } }
+    elseif (Test-Path $from) { Copy-Mod $from $workshopMods[$item] }
     else { Write-Warning "Workshop item $item ($($workshopMods[$item])) is not downloaded; subscribe to it in Steam." }
 }
 
@@ -48,8 +58,8 @@ foreach ($item in $workshopMods.Keys) {
 # With Steam off, each id gets its own save folder, user://default/<id>; with mods loaded the
 # game keeps profiles under modded/.
 $players = @(
-    @{ Id = 1;    Name = $Player1; Log = "couch_host.log" },
-    @{ Id = 1000; Name = $Player2; Log = "couch_client.log" }
+    @{ Id = 1;    Name = $Player1; Log = "couch_host.log";   Pointer = $Pointer1; Speed = $Speed1 },
+    @{ Id = 1000; Name = $Player2; Log = "couch_client.log"; Pointer = $Pointer2; Speed = $Speed2 }
 )
 
 # The game reads display names from ./mp_names.json in its working directory.
@@ -148,6 +158,10 @@ foreach ($slot in 0..($players.Count - 1)) {
     $p = $players[$slot]
     $gameArgs = @("--force-steam", "off", "--clientId", "$($p.Id)", "--log-file", (Join-Path $logDir $p.Log),
                   "--fastmp", $(if ($slot -eq 0) { $hostMode } else { "join" }))
+    if ($InputMode -eq "mice") {
+        $gameArgs += @("--couch-pointer", "`"$($p.Pointer)`"",
+                       "--couch-pointer-speed", $p.Speed.ToString([Globalization.CultureInfo]::InvariantCulture))
+    }
     Start-Process -FilePath $exe -WorkingDirectory $workDir -ArgumentList $gameArgs
     # A client's join times out after 10 s, so the host must be listening first.
     if ($slot -eq 0) { Start-Sleep -Seconds 12 }

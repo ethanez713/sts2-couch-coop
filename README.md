@@ -8,7 +8,7 @@ built-in developer loopback mode (`--fastmp`, ENet on `127.0.0.1:33771`). A smal
 
 1. Build the couch mod once, and again after changing it: in WSL,
    `cd ~/sts2_multi/mod && dotnet build -c Release` (.NET 9 SDK).
-2. For touch controls, subscribe to [Touch-STS2](https://steamcommunity.com/sharedfiles/filedetails/?id=3804990566)
+2. For touch mode only: subscribe to [Touch-STS2](https://steamcommunity.com/sharedfiles/filedetails/?id=3804990566)
    on the Steam Workshop, then turn on **Touchscreen mode** in the game's input settings.
 
 ## Play
@@ -20,21 +20,29 @@ Double-click `couch-coop.bat`, or run it with names: `couch-coop.bat -Player1 Et
 - **Host window** (player 1) opens character select for a new run, or the resume lobby if a
   couch run is saved. To start over instead, abandon from the pause menu inside the run.
 - **Client window** (player 2) joins the host automatically about 20 s after launch.
-- **Mouse or touch:** clicking a window focuses it; tapping doesn't. Only the focused window
-  plays sound.
+- **Input mode** (`-InputMode`):
+  - `mice`: each window follows only its own pointing device, as if on its own PC. By
+    default the host takes the touchpad and the client any other mouse; choose with
+    `-Pointer1`/`-Pointer2` (`touchpad`, `mouse`, or text from the device path, which the
+    logs list) and tune speed with `-Speed1`/`-Speed2`. While a couch window is in front the
+    system cursor is parked out of sight; Alt-Tab away to use other apps. The touchscreen is
+    ignored.
+  - `touch` (default): one mouse and the touchscreen, with Touch-STS2. Clicking a window
+    focuses it; tapping doesn't.
+- Only the focused window plays sound.
 
 ## Couch mod
 
-The launcher copies the couch mod, and Touch-STS2 when it is downloaded, into the game's
+The launcher copies the couch mod, and in touch mode Touch-STS2, into the game's
 `mods` folder and enables mods for the couch windows only. Normal Steam play leaves them
 off, and the couch mod does nothing outside a `--fastmp` session.
 
 - **No remote cursors:** everyone can see every screen, so the other players' cursors are hidden.
 - **Single-pick map:** one player's pick decides the next room, with no vote. The party
   travels once every player has the map open; until then the latest pick wins.
-- **Touch and mouse at once:** each window keeps its own pointer, and touch never moves the
-  mouse cursor or takes focus, so one player can drag by touch while another uses the mouse.
-  Focus, and with it sound, stays with the window last clicked.
+- **Own pointer per window:** each window's game reads and moves only its own pointer, never
+  the shared system cursor, so two players' drags and selections never interfere. In touch
+  mode, touch never moves the mouse cursor or takes focus.
 - **End Turn for All:** after you end your turn, a button beside Ping ends everyone else's turn too.
 
 ## Saves

@@ -28,7 +28,7 @@ static class EndTurnForAll
 
     static int SeatPort(int seat) => BasePort + seat;
 
-    static int OwnSeat()
+    public static int OwnSeat()
     {
         string[] args = OS.GetCmdlineArgs();
         int i = Array.IndexOf(args, "--clientId");
