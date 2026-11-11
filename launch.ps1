@@ -4,7 +4,7 @@ param(
     # mice: each window follows its own pointing device (Pointer1 for the host, Pointer2 for the
     # client): "touchpad", "mouse" (any non-touchpad), or text from the device's path.
     # touch: one shared mouse plus the touchscreen, with the Touch-STS2 mod.
-    [ValidateSet("mice", "touch")] [string]$InputMode = "touch",
+    [ValidateSet("mice", "touch")] [string]$InputMode = "mice",
     [string]$Pointer1 = "touchpad",
     [string]$Pointer2 = "mouse",
     [double]$Speed1 = 1.0,

@@ -21,13 +21,13 @@ Double-click `couch-coop.bat`, or run it with names: `couch-coop.bat -Player1 Et
   couch run is saved. To start over instead, abandon from the pause menu inside the run.
 - **Client window** (player 2) joins the host automatically about 20 s after launch.
 - **Input mode** (`-InputMode`):
-  - `mice`: each window follows only its own pointing device, as if on its own PC. By
+  - `mice` (default): each window follows only its own pointing device, as if on its own PC. By
     default the host takes the touchpad and the client any other mouse; choose with
     `-Pointer1`/`-Pointer2` (`touchpad`, `mouse`, or text from the device path, which the
     logs list) and tune speed with `-Speed1`/`-Speed2`. While a couch window is in front the
     system cursor is parked out of sight; Alt-Tab away to use other apps. The touchscreen is
     ignored.
-  - `touch` (default): one mouse and the touchscreen, with Touch-STS2. Clicking a window
+  - `touch`: one mouse and the touchscreen, with Touch-STS2. Clicking a window
     focuses it; tapping doesn't.
 - Only the focused window plays sound.
 
