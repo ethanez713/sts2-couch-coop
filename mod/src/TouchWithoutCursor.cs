@@ -99,6 +99,15 @@ static class TouchWithoutCursor
             }
             return msg == WM_POINTERACTIVATE ? PA_NOACTIVATE : IntPtr.Zero;
         }
+        // The mouse player's cursor passing over this window mid-touch would take over the drag.
+        if (Fingers.Count > 0 && IsMouseMessage(msg))
+        {
+            return IntPtr.Zero;
+        }
+        if (IsMouseMessage(msg) && msg != 0x02A3 && msg is not (0x020A or 0x020E))
+        {
+            WindowOwnPointer.Pointer = new Vector2((short)((long)lParam & 0xFFFF), (short)(((long)lParam >> 16) & 0xFFFF));
+        }
         // Godot rewrites the window style whenever the window moves or resizes.
         if (msg == WM_STYLECHANGING && (int)wParam == GWL_EXSTYLE)
         {
@@ -115,6 +124,8 @@ static class TouchWithoutCursor
         }
         return result;
     }
+
+    static bool IsMouseMessage(uint msg) => msg is >= 0x0200 and <= 0x020E or 0x02A3;
 
     static uint PointerId(IntPtr wParam) => (uint)((ulong)wParam & 0xFFFF);
 
@@ -141,6 +152,7 @@ static class TouchWithoutCursor
                         ScreenRelative = now - finger.Position,
                     });
                     Fingers[id] = (finger.Index, now);
+                    FollowFirstFinger(finger.Index, now);
                 }
                 break;
             case WM_POINTERUP when Fingers.Remove(id, out var lifted):
@@ -152,7 +164,9 @@ static class TouchWithoutCursor
         }
     }
 
-    static void SendTouch(int index, Vector2 position, bool pressed, bool canceled) =>
+    static void SendTouch(int index, Vector2 position, bool pressed, bool canceled)
+    {
+        FollowFirstFinger(index, position);
         Input.ParseInputEvent(new InputEventScreenTouch
         {
             Index = index,
@@ -160,6 +174,16 @@ static class TouchWithoutCursor
             Pressed = pressed,
             Canceled = canceled,
         });
+    }
+
+    // Godot turns the first finger into this window's mouse.
+    static void FollowFirstFinger(int index, Vector2 position)
+    {
+        if (index == 0)
+        {
+            WindowOwnPointer.Pointer = position;
+        }
+    }
 
     static int FreeIndex() =>
         Enumerable.Range(0, Fingers.Count + 1).First(i => Fingers.Values.All(f => f.Index != i));
