@@ -22,6 +22,7 @@ public static class CouchMod
         }
         new Harmony("sts2-couch.CouchCoop").PatchAll(typeof(CouchMod).Assembly);
         EndTurnForAll.StartListening();
+        Callable.From(TouchWithoutCursor.Install).CallDeferred();
         Log.Info("[CouchCoop] patches applied");
     }
 }
