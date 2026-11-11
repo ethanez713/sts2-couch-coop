@@ -16,20 +16,21 @@ namespace CouchCoop;
 // pointer are rewritten to use the window's own last input position instead.
 static class WindowOwnPointer
 {
-    // From a scan of sts2.dll and TouchSts2.dll for the calls below; nested lambda types are
-    // scanned too. A name that no longer resolves is logged, not fatal.
-    static readonly string[] CallerTypes =
+    // From a scan of sts2.dll for the calls below; nested lambda and async types are scanned too.
+    static readonly Type[] GameCallers =
     {
-        "MegaCrit.Sts2.Core.Nodes.Combat.NMouseCardPlay",
-        "MegaCrit.Sts2.Core.Nodes.Combat.NTargetingArrow",
-        "MegaCrit.Sts2.Core.Nodes.Potions.NPotionPopup",
-        "MegaCrit.Sts2.Core.Nodes.Screens.TreasureRoomRelic.NHandImageCollection",
-        "MegaCrit.Sts2.Core.Nodes.Reaction.NReactionWheel",
-        "MegaCrit.Sts2.Core.Nodes.Screens.Map.NMouseHeldMapDrawingInput",
-        "MegaCrit.Sts2.Core.Nodes.Vfx.NFollowCursor",
-        "MegaCrit.Sts2.Core.Nodes.CommonUi.NControllerManager",
-        "TouchSts2.TouchRuntime",
+        typeof(MegaCrit.Sts2.Core.Nodes.Combat.NMouseCardPlay),
+        typeof(MegaCrit.Sts2.Core.Nodes.Combat.NTargetingArrow),
+        typeof(MegaCrit.Sts2.Core.Nodes.Potions.NPotionPopup),
+        typeof(MegaCrit.Sts2.Core.Nodes.Screens.TreasureRoomRelic.NHandImageCollection),
+        typeof(MegaCrit.Sts2.Core.Nodes.Reaction.NReactionWheel),
+        typeof(MegaCrit.Sts2.Core.Nodes.Screens.Map.NMouseHeldMapDrawingInput),
+        typeof(MegaCrit.Sts2.Core.Nodes.Vfx.NFollowCursor),
+        typeof(MegaCrit.Sts2.Core.Nodes.CommonUi.NControllerManager),
     };
+
+    // Optional mods, loaded only in some setups.
+    static readonly string[] ModCallers = { "TouchSts2.TouchRuntime" };
 
     static readonly Dictionary<MethodInfo, MethodInfo> Replacements = new()
     {
@@ -50,24 +51,40 @@ static class WindowOwnPointer
     // Runs after every mod has loaded, so Touch-STS2's types resolve.
     public static void Install()
     {
+        foreach (var (original, replacement) in Replacements.ToList().Where(r => !SameStackShape(r.Key, r.Value)))
+        {
+            Log.Error($"[CouchCoop] pointer: {replacement.Name} does not match {original.DeclaringType?.Name}.{original.Name}; left alone");
+            Replacements.Remove(original);
+        }
         var harmony = new Harmony("sts2-couch.CouchCoop.pointer");
         var transpiler = new HarmonyMethod(AccessTools.Method(typeof(WindowOwnPointer), nameof(Rewrite)));
         int patched = 0;
-        foreach (string name in CallerTypes)
+        IEnumerable<Type> callers = GameCallers.Concat(ModCallers.Select(AccessTools.TypeByName).OfType<Type>());
+        foreach (MethodBase method in callers.SelectMany(MethodsOf).Where(CallsPointerApi))
         {
-            Type? type = AccessTools.TypeByName(name);
-            if (type == null)
-            {
-                Log.Warn($"[CouchCoop] pointer: type {name} not found");
-                continue;
-            }
-            foreach (MethodBase method in MethodsOf(type).Where(CallsPointerApi))
+            try
             {
                 harmony.Patch(method, transpiler: transpiler);
                 patched++;
             }
+            catch (Exception e)
+            {
+                Log.Error($"[CouchCoop] pointer: could not rewrite {method.DeclaringType?.Name}.{method.Name}: {e.Message}");
+            }
         }
         Log.Info($"[CouchCoop] each window keeps its own pointer ({patched} call sites rewritten)");
+    }
+
+    // A static replacement takes the original's instance (if any) as its first parameter.
+    static bool SameStackShape(MethodInfo original, MethodInfo replacement)
+    {
+        IEnumerable<Type> takes = original.GetParameters().Select(p => p.ParameterType);
+        if (!original.IsStatic)
+        {
+            takes = takes.Prepend(original.DeclaringType!);
+        }
+        return replacement.IsStatic && replacement.ReturnType == original.ReturnType
+               && takes.SequenceEqual(replacement.GetParameters().Select(p => p.ParameterType));
     }
 
     static IEnumerable<MethodBase> MethodsOf(Type type)
