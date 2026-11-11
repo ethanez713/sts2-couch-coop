@@ -20,7 +20,9 @@ static class TouchWithoutCursor
     const uint WM_POINTERUP = 0x0247;
     const uint WM_POINTERENTER = 0x0249;
     const uint WM_POINTERLEAVE = 0x024A;
+    const uint WM_POINTERACTIVATE = 0x024B;
     const uint WM_POINTERCAPTURECHANGED = 0x024C;
+    const int PA_NOACTIVATE = 3;
     const int PT_TOUCH = 2;
     const uint POINTER_FLAG_CANCELED = 0x8000;
     const int GWLP_WNDPROC = -4;
@@ -76,7 +78,8 @@ static class TouchWithoutCursor
             {
                 Log.Error($"[CouchCoop] touch message {msg:X} failed: {e.Message}");
             }
-            return IntPtr.Zero;
+            // A touch never takes focus, so it can't pull focus from a mouse drag in the other window.
+            return msg == WM_POINTERACTIVATE ? PA_NOACTIVATE : IntPtr.Zero;
         }
         return CallWindowProc(_godotProc, hwnd, msg, wParam, lParam);
     }

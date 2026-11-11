@@ -20,8 +20,8 @@ Double-click `couch-coop.bat`, or run it with names: `couch-coop.bat -Player1 Et
 - **Host window** (player 1) opens character select for a new run, or the resume lobby if a
   couch run is saved. To start over instead, abandon from the pause menu inside the run.
 - **Client window** (player 2) joins the host automatically about 20 s after launch.
-- **Mouse or touch:** clicking or tapping a window focuses it. Only the focused window plays
-  sound.
+- **Mouse or touch:** clicking a window focuses it; tapping doesn't. Only the focused window
+  plays sound.
 
 ## Couch mod
 
@@ -32,8 +32,9 @@ off, and the couch mod does nothing outside a `--fastmp` session.
 - **No remote cursors:** everyone can see every screen, so the other players' cursors are hidden.
 - **Single-pick map:** one player's pick decides the next room, with no vote. The party
   travels once every player has the map open; until then the latest pick wins.
-- **Touch and mouse at once:** touch doesn't move the mouse cursor, so one player can tap
-  while another uses the mouse.
+- **Touch and mouse at once:** touch doesn't move the mouse cursor or take focus, so one
+  player can tap while another uses the mouse. Focus, and with it sound, stays with the
+  window last clicked.
 - **End turn for All:** after you end your turn, a button beside Ping ends everyone else's turn too.
 
 ## Saves
