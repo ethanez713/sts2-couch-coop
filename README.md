@@ -30,6 +30,8 @@ The launcher copies the couch mod, and Touch-STS2 when it is downloaded, into th
 off, and the couch mod does nothing outside a `--fastmp` session.
 
 - **No remote cursors:** everyone can see every screen, so the other players' cursors are hidden.
+- **Single-pick map:** one player's pick decides the next room, with no vote. The party
+  travels once every player has the map open; until then the latest pick wins.
 
 ## Saves
 
