@@ -75,7 +75,7 @@ static class SeatPointer
         WindowOwnPointer.Pointer = _sentPointer = new Vector2(client.Right / 2, client.Bottom / 2);
         TellGodotMouseEntered();
         SoftwareCursor.Install(tree);
-        tree.ProcessFrame += SendPendingMotion;
+        tree.ProcessFrame += OnFrame;
         if (EndTurnForAll.OwnSeat() == 0)
         {
             new Thread(ParkSystemCursor) { IsBackground = true, Name = "CouchCoop cursor park" }.Start();
@@ -235,6 +235,12 @@ static class SeatPointer
     // fingers are ignored, and the device can't move the pointer until the finger lifts.
     static uint? _touch;
 
+    // A tap lands without any approach, but the game picks targets from hover, which it only
+    // updates a frame after the pointer moves; the press waits until it has.
+    const int TapSettleFrames = 2;
+    static int _pressInFrames;
+    static bool _releaseAfterPress;
+
     public static void TouchDown(uint id, Vector2 at)
     {
         if (_touch != null)
@@ -243,7 +249,8 @@ static class SeatPointer
         }
         _touch = id;
         MoveTo(at);
-        SendButton(MouseButton.Left, pressed: true);
+        SendPendingMotion();
+        _pressInFrames = TapSettleFrames;
     }
 
     public static void TouchMove(uint id, Vector2 at)
@@ -266,7 +273,26 @@ static class SeatPointer
             MoveTo(lifted);
         }
         _touch = null;
+        if (_pressInFrames > 0)
+        {
+            _releaseAfterPress = true;
+            return;
+        }
         SendButton(MouseButton.Left, pressed: false);
+    }
+
+    static void OnFrame()
+    {
+        SendPendingMotion();
+        if (_pressInFrames > 0 && --_pressInFrames == 0)
+        {
+            SendButton(MouseButton.Left, pressed: true);
+            if (_releaseAfterPress)
+            {
+                _releaseAfterPress = false;
+                SendButton(MouseButton.Left, pressed: false);
+            }
+        }
     }
 
     // The game moving the mouse (controller switch, reaction wheel) moves this window's pointer.
