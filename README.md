@@ -1,13 +1,27 @@
 # Slay the Spire 2 couch co-op
 
-Two players on one Windows PC, each with their own game window, linked over the game's
-built-in developer loopback mode (`--fastmp`, ENet on `127.0.0.1:33771`). A small mod
-(`mod/`) tunes co-op for players sitting in the same room.
+**Play Slay the Spire 2 co-op with someone on the same couch, on one PC.** The game's
+co-op is online only. This launcher opens two game windows on one machine, links them
+over the game's own loopback mode, and adds a small mod so two people in one room are
+not fighting over one cursor.
+
+- Each player has their own window and their own pointer: two mice, or a mouse and a
+  touchpad or touchscreen.
+- One copy of the game. No second Steam account and no network.
+- Couch saves stay apart from your Steam profile.
+
+Unofficial. Slay the Spire 2 is by Mega Crit, and this project is not affiliated with
+them. It relies on a developer launch flag (`--fastmp`, ENet on `127.0.0.1:33771`) that
+any game update could change.
 
 ## Setup
 
-1. Build the couch mod once, and again after changing it: in WSL,
-   `cd ~/sts2_multi/mod && dotnet build -c Release` (.NET 9 SDK).
+Windows, with Slay the Spire 2 installed through Steam and the .NET 9 SDK.
+
+1. Build the mod once, and again after changing it:
+   `cd mod && dotnet build -c Release`. The project expects the game at the default
+   Steam path as seen from WSL; anywhere else, add
+   `-p:GameData="<game folder>\data_sts2_windows_x86_64"`.
 2. For touch mode only: subscribe to [Touch-STS2](https://steamcommunity.com/sharedfiles/filedetails/?id=3804990566)
    on the Steam Workshop, then turn on **Touchscreen mode** in the game's input settings.
 
@@ -69,3 +83,7 @@ Logs: `%APPDATA%\SlayTheSpire2\logs\couch_host.log` and `couch_client.log`.
 
 - Two players. The game's dev mode reserves client ids 2000 and 3000 for players 3–4.
 - A controller follows whichever window has focus.
+
+## License
+
+[MIT](LICENSE). Copyright (c) 2026 Ethan Zhou.
