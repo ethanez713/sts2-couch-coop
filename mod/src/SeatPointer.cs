@@ -99,8 +99,14 @@ static class SeatPointer
         CouchWindow.CallGodot(_hwnd, WM_MOUSEMOVE, IntPtr.Zero, (IntPtr)(((int)p.Y << 16) | ((int)p.X & 0xFFFF)));
     }
 
-    public static void OnRawInput(IntPtr lParam)
+    public static void OnRawInput(IntPtr wParam, IntPtr lParam)
     {
+        // RIM_INPUTSINK: delivered while another window is in front.
+        if ((long)wParam == 1 && !_loggedBackground)
+        {
+            _loggedBackground = true;
+            Log.Info("[CouchCoop] receiving pointer input while in the background");
+        }
         if (!IsCouchWindow(GetForegroundWindow()))
         {
             ReleaseHeldButtons();
@@ -200,6 +206,7 @@ static class SeatPointer
     }
 
     static float _systemSpeed = 1;
+    static bool _loggedBackground;
 
     // The game moving the mouse (controller switch, reaction wheel) moves this window's pointer.
     public static void WarpTo(Vector2 target) => MoveTo(target);

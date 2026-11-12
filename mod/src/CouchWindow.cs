@@ -34,6 +34,10 @@ static class CouchWindow
     const uint WM_MOUSEACTIVATE = 0x0021;
     const uint WM_STYLECHANGING = 0x007C;
     const uint WM_INPUT = 0x00FF;
+    const uint WM_ACTIVATE = 0x0006;
+    const uint WM_TIMER = 0x0113;
+    const uint WM_EXITSIZEMOVE = 0x0232;
+    const int MA_NOACTIVATEANDEAT = 4;
     const uint WM_MOUSEHOVER = 0x02A1;
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
@@ -140,6 +144,12 @@ static class CouchWindow
             Marshal.WriteInt32(lParam, 4, styleNew | (int)WS_EX_NOACTIVATE);
         }
         IntPtr result = CallWindowProc(_godotProc, hwnd, msg, wParam, lParam);
+        // Godot re-registers its own focus-following raw mouse input on activation and after a
+        // move or resize, which would cut this window off from its device in the background.
+        if (SeatPointer.Active && msg is WM_ACTIVATE or WM_TIMER or WM_EXITSIZEMOVE)
+        {
+            SeatPointer.Register();
+        }
         // Touch never reaches here as mouse input, so this is a real mouse click, which should
         // still focus its window despite the no-activate style.
         if (msg == WM_MOUSEACTIVATE && GetForegroundWindow() != hwnd)
@@ -157,7 +167,7 @@ static class CouchWindow
         {
             try
             {
-                SeatPointer.OnRawInput(lParam);
+                SeatPointer.OnRawInput(wParam, lParam);
             }
             catch (Exception e)
             {
@@ -168,6 +178,12 @@ static class CouchWindow
         if (IsMouseMessage(msg) || msg == WM_MOUSEHOVER)
         {
             return IntPtr.Zero;
+        }
+        // A click here comes from the parked system cursor, not this window's device; it only
+        // brings the game back when another app is in front.
+        if (msg == WM_MOUSEACTIVATE && SeatPointer.CouchWindowInFront())
+        {
+            return MA_NOACTIVATEANDEAT;
         }
         if (msg is >= WM_POINTERUPDATE and <= WM_POINTERCAPTURECHANGED
             && GetPointerType(PointerId(wParam), out int type) && type == PT_TOUCH)
