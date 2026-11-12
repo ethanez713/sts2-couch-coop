@@ -200,7 +200,7 @@ static class SeatPointer
             ScreenToClient(_hwnd, ref screen);
             MoveTo(new Vector2(screen.X, screen.Y));
         }
-        else if (mouse.LastX != 0 || mouse.LastY != 0)
+        else if ((mouse.LastX != 0 || mouse.LastY != 0) && _touch == null)
         {
             MoveTo(WindowOwnPointer.Pointer + new Vector2(mouse.LastX, mouse.LastY) * _speed * _systemSpeed);
         }
@@ -230,6 +230,44 @@ static class SeatPointer
 
     static float _systemSpeed = 1;
     static bool _loggedBackground;
+
+    // The first finger down acts as this window's mouse with its left button held; further
+    // fingers are ignored, and the device can't move the pointer until the finger lifts.
+    static uint? _touch;
+
+    public static void TouchDown(uint id, Vector2 at)
+    {
+        if (_touch != null)
+        {
+            return;
+        }
+        _touch = id;
+        MoveTo(at);
+        SendButton(MouseButton.Left, pressed: true);
+    }
+
+    public static void TouchMove(uint id, Vector2 at)
+    {
+        if (_touch == id)
+        {
+            MoveTo(at);
+        }
+    }
+
+    // A cancelled touch (the system took the gesture) still lifts the button so nothing stays held.
+    public static void TouchUp(uint id, Vector2? at, bool canceled)
+    {
+        if (_touch != id)
+        {
+            return;
+        }
+        if (at is { } lifted && !canceled)
+        {
+            MoveTo(lifted);
+        }
+        _touch = null;
+        SendButton(MouseButton.Left, pressed: false);
+    }
 
     // The game moving the mouse (controller switch, reaction wheel) moves this window's pointer.
     public static void WarpTo(Vector2 target) => MoveTo(target);

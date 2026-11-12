@@ -190,9 +190,39 @@ static class CouchWindow
         if (msg is >= WM_POINTERUPDATE and <= WM_POINTERCAPTURECHANGED
             && GetPointerType(PointerId(wParam), out int type) && type == PT_TOUCH)
         {
+            try
+            {
+                TouchAsPointer(hwnd, msg, wParam, lParam);
+            }
+            catch (Exception e)
+            {
+                Log.Error($"[CouchCoop] touch message {msg:X} failed: {e.Message}");
+            }
             return msg == WM_POINTERACTIVATE ? PA_NOACTIVATE : IntPtr.Zero;
         }
         return null;
+    }
+
+    // A finger on this window drives this window's pointer, like its own device does.
+    static void TouchAsPointer(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam)
+    {
+        uint id = PointerId(wParam);
+        switch (msg)
+        {
+            case WM_POINTERDOWN:
+                SeatPointer.TouchDown(id, ClientPosition(hwnd, lParam));
+                break;
+            case WM_POINTERUPDATE:
+                SeatPointer.TouchMove(id, ClientPosition(hwnd, lParam));
+                break;
+            case WM_POINTERUP:
+                bool canceled = (((ulong)wParam >> 16) & POINTER_FLAG_CANCELED) != 0;
+                SeatPointer.TouchUp(id, ClientPosition(hwnd, lParam), canceled);
+                break;
+            case WM_POINTERCAPTURECHANGED:
+                SeatPointer.TouchUp(id, null, canceled: true);
+                break;
+        }
     }
 
     static bool IsMouseMessage(uint msg) => msg is >= 0x0200 and <= 0x020E or 0x02A3;
