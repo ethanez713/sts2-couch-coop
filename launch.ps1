@@ -7,7 +7,8 @@ param(
     [ValidateSet("mice", "touch")] [string]$InputMode = "mice",
     [string]$Pointer1 = "touchpad",
     [string]$Pointer2 = "mouse",
-    [double]$Speed1 = 1.0,
+    # Raw touchpad movement lacks the acceleration Windows gives its cursor, so it starts faster.
+    [double]$Speed1 = 2.0,
     [double]$Speed2 = 1.0,
     [string]$GameDir = "C:\Program Files (x86)\Steam\steamapps\common\Slay the Spire 2"
 )
