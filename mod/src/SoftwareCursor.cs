@@ -19,6 +19,7 @@ static class SoftwareCursor
         _layer = new CanvasLayer { Name = "CouchCoopCursor", Layer = 4096 };
         _sprite = new TextureRect { MouseFilter = Control.MouseFilterEnum.Ignore, TextureFilter = CanvasItem.TextureFilterEnum.Linear };
         _layer.AddChild(_sprite);
+        _sprite.Ready += Refresh;
         tree.Root.CallDeferred(Node.MethodName.AddChild, _layer);
         Refresh();
     }
