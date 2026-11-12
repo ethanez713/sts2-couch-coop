@@ -72,9 +72,10 @@ static class SeatPointer
             tree.Root.GuiEmbedSubwindows = true;
         }
         GetClientRect(hwnd, out Rect client);
-        WindowOwnPointer.Pointer = new Vector2(client.Right / 2, client.Bottom / 2);
+        WindowOwnPointer.Pointer = _sentPointer = new Vector2(client.Right / 2, client.Bottom / 2);
         TellGodotMouseEntered();
         SoftwareCursor.Install(tree);
+        tree.ProcessFrame += SendPendingMotion;
         if (EndTurnForAll.OwnSeat() == 0)
         {
             new Thread(ParkSystemCursor) { IsBackground = true, Name = "CouchCoop cursor park" }.Start();
@@ -82,7 +83,21 @@ static class SeatPointer
         Log.Info($"[CouchCoop] this window takes pointer input only from the '{_selector}' device (speed {_speed})");
     }
 
-    public static void Register()
+    // Godot replaces it with its own focus-following registration on activation and after a move.
+    public static void EnsureRegistered()
+    {
+        uint count = 8;
+        var registered = new RawInputDevice[count];
+        uint found = GetRegisteredRawInputDevices(registered, ref count, (uint)Marshal.SizeOf<RawInputDevice>());
+        bool ours = found != uint.MaxValue && registered.Take((int)found).Any(d =>
+            d is { UsagePage: 0x01, Usage: 0x02 } && d.Target == _hwnd && (d.Flags & RIDEV_INPUTSINK) != 0);
+        if (!ours)
+        {
+            Register();
+        }
+    }
+
+    static void Register()
     {
         var device = new RawInputDevice { UsagePage = 0x01, Usage = 0x02, Flags = RIDEV_INPUTSINK, Target = _hwnd };
         if (!RegisterRawInputDevices(new[] { device }, 1, (uint)Marshal.SizeOf<RawInputDevice>()))
@@ -112,29 +127,37 @@ static class SeatPointer
             ReleaseHeldButtons();
             return;
         }
-        uint size = 0;
-        uint header = (uint)Marshal.SizeOf<RawInputHeader>();
-        GetRawInputData(lParam, RID_INPUT, IntPtr.Zero, ref size, header);
-        IntPtr buffer = Marshal.AllocHGlobal((int)size);
-        try
+        // Every report from every pointing device reaches every couch window, up to 1000 a second
+        // per device, so this path allocates nothing.
+        uint size = RawBufferSize;
+        if (GetRawInputData(lParam, RID_INPUT, RawBuffer, ref size, HeaderSize) is 0 or uint.MaxValue
+            || Marshal.ReadInt32(RawBuffer, HeaderTypeOffset) != RIM_TYPEMOUSE
+            || !IsMine(Marshal.ReadIntPtr(RawBuffer, HeaderDeviceOffset)))
         {
-            if (GetRawInputData(lParam, RID_INPUT, buffer, ref size, header) != size)
-            {
-                return;
-            }
-            var head = Marshal.PtrToStructure<RawInputHeader>(buffer);
-            if (head.Type != RIM_TYPEMOUSE || !IsMine(head.Device))
-            {
-                return;
-            }
-            var mouse = Marshal.PtrToStructure<RawMouse>(buffer + (int)header);
-            Apply(mouse);
+            return;
         }
-        finally
+        Apply(new RawMouse
         {
-            Marshal.FreeHGlobal(buffer);
-        }
+            Flags = (ushort)Marshal.ReadInt16(RawBuffer, FlagsOffset),
+            ButtonFlags = (ushort)Marshal.ReadInt16(RawBuffer, ButtonFlagsOffset),
+            ButtonData = (ushort)Marshal.ReadInt16(RawBuffer, ButtonDataOffset),
+            LastX = Marshal.ReadInt32(RawBuffer, LastXOffset),
+            LastY = Marshal.ReadInt32(RawBuffer, LastYOffset),
+        });
     }
+
+    const uint RawBufferSize = 256;
+    static readonly IntPtr RawBuffer = Marshal.AllocHGlobal((int)RawBufferSize);
+    static readonly uint HeaderSize = (uint)Marshal.SizeOf<RawInputHeader>();
+    static readonly int HeaderTypeOffset = (int)Marshal.OffsetOf<RawInputHeader>(nameof(RawInputHeader.Type));
+    static readonly int HeaderDeviceOffset = (int)Marshal.OffsetOf<RawInputHeader>(nameof(RawInputHeader.Device));
+    static readonly int FlagsOffset = MouseOffset(nameof(RawMouse.Flags));
+    static readonly int ButtonFlagsOffset = MouseOffset(nameof(RawMouse.ButtonFlags));
+    static readonly int ButtonDataOffset = MouseOffset(nameof(RawMouse.ButtonData));
+    static readonly int LastXOffset = MouseOffset(nameof(RawMouse.LastX));
+    static readonly int LastYOffset = MouseOffset(nameof(RawMouse.LastY));
+
+    static int MouseOffset(string field) => (int)HeaderSize + (int)Marshal.OffsetOf<RawMouse>(field);
 
     // A release made after Alt-Tab away never arrives here.
     static void ReleaseHeldButtons()
@@ -211,29 +234,39 @@ static class SeatPointer
     // The game moving the mouse (controller switch, reaction wheel) moves this window's pointer.
     public static void WarpTo(Vector2 target) => MoveTo(target);
 
+    // The pointer moves at once (the game reads it any time); Godot gets one motion event per
+    // frame, as with Windows' own coalesced cursor messages, sent before the frame's processing.
     static void MoveTo(Vector2 target)
     {
         GetClientRect(_hwnd, out Rect client);
-        target = target.Clamp(Vector2.Zero, new Vector2(Math.Max(0, client.Right - 1), Math.Max(0, client.Bottom - 1)));
-        Vector2 relative = target - WindowOwnPointer.Pointer;
+        WindowOwnPointer.Pointer = target.Clamp(Vector2.Zero, new Vector2(Math.Max(0, client.Right - 1), Math.Max(0, client.Bottom - 1)));
+    }
+
+    static Vector2 _sentPointer;
+
+    static void SendPendingMotion()
+    {
+        Vector2 at = WindowOwnPointer.Pointer;
+        Vector2 relative = at - _sentPointer;
         if (relative == Vector2.Zero)
         {
             return;
         }
         ulong now = Time.GetTicksUsec();
-        double seconds = Math.Max(0.001, (now - _lastMoveUsec) / 1e6);
+        float seconds = (float)Math.Max(0.001, (now - _lastMoveUsec) / 1e6);
         _lastMoveUsec = now;
-        WindowOwnPointer.Pointer = target;
-        Input.ParseInputEvent(new InputEventMouseMotion
+        _sentPointer = at;
+        using var motion = new InputEventMouseMotion
         {
-            Position = target,
-            GlobalPosition = target,
+            Position = at,
+            GlobalPosition = at,
             Relative = relative,
             ScreenRelative = relative,
-            Velocity = relative / (float)seconds,
-            ScreenVelocity = relative / (float)seconds,
+            Velocity = relative / seconds,
+            ScreenVelocity = relative / seconds,
             ButtonMask = _buttons,
-        });
+        };
+        Input.ParseInputEvent(motion);
         SoftwareCursor.Refresh();
     }
 
@@ -251,6 +284,7 @@ static class SeatPointer
 
     static void SendButton(MouseButton button, bool pressed, float factor = 1)
     {
+        SendPendingMotion();
         bool isWheel = button is >= MouseButton.WheelUp and <= MouseButton.WheelRight;
         var mask = isWheel ? 0 : (MouseButtonMask)(1 << ((int)button - 1));
         _buttons = pressed ? _buttons | mask : _buttons & ~mask;
@@ -263,7 +297,7 @@ static class SeatPointer
                           && _lastPress.At.DistanceTo(at) <= GetSystemMetrics(36);
             _lastPress = doubleClick ? default : (button, now, at);
         }
-        Input.ParseInputEvent(new InputEventMouseButton
+        using var click = new InputEventMouseButton
         {
             ButtonIndex = button,
             Pressed = pressed,
@@ -272,7 +306,8 @@ static class SeatPointer
             ButtonMask = _buttons,
             DoubleClick = doubleClick,
             Factor = factor,
-        });
+        };
+        Input.ParseInputEvent(click);
         SoftwareCursor.Refresh();
     }
 
@@ -298,7 +333,10 @@ static class SeatPointer
                     var center = new Point { X = client.Right / 2, Y = client.Bottom / 2 };
                     ClientToScreen(_hwnd, ref center);
                     var spot = new Rect { Left = center.X, Top = center.Y, Right = center.X + 1, Bottom = center.Y + 1 };
-                    ClipCursor(ref spot);
+                    if (!GetClipCursor(out Rect current) || !current.Equals(spot))
+                    {
+                        ClipCursor(ref spot);
+                    }
                     parked = true;
                 }
                 else if (parked)
@@ -368,6 +406,9 @@ static class SeatPointer
     static extern bool RegisterRawInputDevices(RawInputDevice[] devices, uint count, uint size);
 
     [DllImport("user32.dll")]
+    static extern uint GetRegisteredRawInputDevices([Out] RawInputDevice[] devices, ref uint count, uint size);
+
+    [DllImport("user32.dll")]
     static extern uint GetRawInputData(IntPtr rawInput, uint command, IntPtr data, ref uint size, uint headerSize);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
@@ -390,6 +431,9 @@ static class SeatPointer
 
     [DllImport("user32.dll")]
     static extern bool ClipCursor(ref Rect rect);
+
+    [DllImport("user32.dll")]
+    static extern bool GetClipCursor(out Rect rect);
 
     [DllImport("user32.dll")]
     static extern bool ClipCursor(IntPtr rect);

@@ -37,6 +37,8 @@ static class CouchWindow
     const uint WM_ACTIVATE = 0x0006;
     const uint WM_TIMER = 0x0113;
     const uint WM_EXITSIZEMOVE = 0x0232;
+    // DisplayServerWindows::TIMER_ID_WINDOW_ACTIVATION (Godot 4.5)
+    const long GodotActivationTimer = 2;
     const int MA_NOACTIVATEANDEAT = 4;
     const uint WM_MOUSEHOVER = 0x02A1;
 
@@ -146,9 +148,9 @@ static class CouchWindow
         IntPtr result = CallWindowProc(_godotProc, hwnd, msg, wParam, lParam);
         // Godot re-registers its own focus-following raw mouse input on activation and after a
         // move or resize, which would cut this window off from its device in the background.
-        if (SeatPointer.Active && msg is WM_ACTIVATE or WM_TIMER or WM_EXITSIZEMOVE)
+        if (SeatPointer.Active && (msg is WM_ACTIVATE or WM_EXITSIZEMOVE || (msg == WM_TIMER && (long)wParam == GodotActivationTimer)))
         {
-            SeatPointer.Register();
+            SeatPointer.EnsureRegistered();
         }
         // Touch never reaches here as mouse input, so this is a real mouse click, which should
         // still focus its window despite the no-activate style.
