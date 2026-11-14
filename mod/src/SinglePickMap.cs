@@ -18,8 +18,8 @@ static class SinglePickMap
 {
     static readonly AccessTools.FieldRef<MapSelectionSynchronizer, INetGameService> NetService =
         AccessTools.FieldRefAccess<MapSelectionSynchronizer, INetGameService>("_netService");
-    static readonly AccessTools.FieldRef<MapSelectionSynchronizer, RunState> RunStateOf =
-        AccessTools.FieldRefAccess<MapSelectionSynchronizer, RunState>("_runState");
+    static readonly AccessTools.FieldRef<MapSelectionSynchronizer, IRunState> RunStateOf =
+        AccessTools.FieldRefAccess<MapSelectionSynchronizer, IRunState>("_runState");
     static readonly AccessTools.FieldRef<MapSelectionSynchronizer, MapLocation> Source =
         AccessTools.FieldRefAccess<MapSelectionSynchronizer, MapLocation>("_acceptingVotesFromSource");
     static readonly AccessTools.FieldRef<MapSelectionSynchronizer, List<MapVote?>> Votes =
@@ -74,7 +74,7 @@ static class SinglePickMap
             return;
         }
         WatchScreens(input);
-        RunState run = RunStateOf(sync);
+        IRunState run = RunStateOf(sync);
         List<Player> notOnMap = run.Players.Where(p => input.GetScreenType(p.NetId) != NetScreenType.Map).ToList();
         if (notOnMap.Count > 0)
         {
