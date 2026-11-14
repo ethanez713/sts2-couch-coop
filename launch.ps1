@@ -13,6 +13,7 @@ param(
     [string]$GameDir = "C:\Program Files (x86)\Steam\steamapps\common\Slay the Spire 2"
 )
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "couch-saves.ps1")
 
 if (Get-Process -Name SlayTheSpire2 -ErrorAction SilentlyContinue) {
     throw "Slay the Spire 2 is already running. Close it first; the host needs port 33771 free."
@@ -25,10 +26,6 @@ Add-Type -AssemblyName System.Windows.Forms
 
 $exe = Join-Path $GameDir "SlayTheSpire2.exe"
 $steamApps = Split-Path (Split-Path $GameDir)
-$userData = Join-Path $env:APPDATA "SlayTheSpire2"
-$logDir = Join-Path $userData "logs"
-$workDir = Join-Path $env:LOCALAPPDATA "sts2-couch"
-New-Item -ItemType Directory -Force -Path $logDir, $workDir | Out-Null
 
 # The game loads mods from a folder next to its exe. Couch windows run with Steam off, so
 # Workshop items are not read from Steam; they are copied in like local mods. Normal Steam
@@ -89,10 +86,10 @@ function Get-Layout([int]$slot) {
     }
 }
 
-# Couch runs never touch the Steam profile, so couch and online co-op saves cannot collide.
-# Each window starts from the owner's progress and settings, copied fresh on every launch;
-# nothing earned in a couch run flows back. The exception is co-op ascension, which couch
-# runs earn and keep (Merge-CoopAscension).
+# Each window starts from the owner's progress and settings, copied fresh on every launch.
+# The host's progress and run history flow back to the Steam profile when the game closes
+# (couch-saves.ps1), and any session that ended unsynced is flushed before seeding. Player 2's
+# earnings are discarded, except co-op ascension (Merge-CoopAscension).
 function Get-ProgressInt([string]$path, [string]$field) {
     if (-not (Test-Path $path)) { return $null }
     $m = [regex]::Match([IO.File]::ReadAllText($path), "`"$field`"\s*:\s*(\d+)")
@@ -117,13 +114,8 @@ function Merge-CoopAscension([string[]]$couchProgress, [string]$steamProgress) {
     if ($null -eq $max) { return }
     return @{ max = [int]$max; preferred = [Math]::Min([int]$preferred, [int]$max) }
 }
-$steamAccount = Get-ChildItem (Join-Path $userData "steam") -Directory -ErrorAction SilentlyContinue |
-    Sort-Object LastWriteTime -Descending | Select-Object -First 1
-if (-not $steamAccount) { throw "No Steam save folder under $userData\steam. Run the game through Steam once first." }
-$profileId = (Get-Content (Join-Path $steamAccount.FullName "profile.save") -Raw | ConvertFrom-Json).last_profile_id
-$steamSaves = Join-Path $steamAccount.FullName "profile$profileId\saves"
+Sync-HostProgressToSteam
 
-$couchProfile = "modded\profile1"
 $couchProgress = @($players | ForEach-Object { Join-Path $userData "default\$($_.Id)\$couchProfile\saves\progress.save" })
 $coopAscension = Merge-CoopAscension $couchProgress (Join-Path $steamSaves "progress.save")
 
@@ -149,6 +141,8 @@ for ($slot = 0; $slot -lt $players.Count; $slot++) {
     [IO.File]::WriteAllText((Join-Path $folder "settings.save"), (ConvertTo-Json $settings -Depth 10))
 }
 
+Save-SeedMarker
+
 # --fastmp is the game's own loopback mode: ENet on 127.0.0.1:33771 instead of Steam
 # networking. Both windows run with Steam off (see above). The host resumes the couch run
 # if one is saved, otherwise opens character select for a new standard run.
@@ -167,3 +161,7 @@ foreach ($slot in 0..($players.Count - 1)) {
     # A client's join times out after 10 s, so the host must be listening first.
     if ($slot -eq 0) { Start-Sleep -Seconds 12 }
 }
+
+# The launcher exits now; a hidden copy of couch-saves.ps1 waits for the windows to close.
+Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @(
+    "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$PSScriptRoot\couch-saves.ps1`"", "-SyncWhenClosed")
