@@ -15,11 +15,25 @@ public static class CouchMod
 
     public static bool IsCouchSession => Seat.HasValue;
 
+    // Seat 0 only. "new" starts a standard lobby; "load" resumes the multiplayer save.
+    public static string? CouchHostMode { get; } = ArgValue("--couch-host");
+
+    public static bool IsCouchHost => CouchHostMode != null;
+
+    public static int? CouchSeats { get; } = ReadInt("--couch-seats");
+
+    // Seats 1–3. ENet reports that host as peer 1; the handshake is keyed on this SteamID64.
+    public static ulong? CouchHostId { get; } = ReadUlong("--couch-host-id");
+
     static int? ReadSeat()
     {
         string? value = ArgValue("--couch-seat");
         return int.TryParse(value, out int seat) && seat >= 0 ? seat : null;
     }
+
+    static int? ReadInt(string name) => int.TryParse(ArgValue(name), out int parsed) ? parsed : null;
+
+    static ulong? ReadUlong(string name) => ulong.TryParse(ArgValue(name), out ulong parsed) ? parsed : null;
 
     public static string? ArgValue(string name)
     {

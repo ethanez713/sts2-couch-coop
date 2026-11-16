@@ -1,17 +1,38 @@
+using System.Collections.Generic;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Nodes.Multiplayer;
 
 namespace CouchCoop;
 
-// Everyone sees every screen in the same room, so the other players' cursors are only noise.
+// Couch seats share a room, so their cursors are noise. Friends are elsewhere; theirs stay.
+// Offline, every peer is a couch seat.
 [HarmonyPatch(typeof(NRemoteMouseCursorContainer), "UpdateCursorVisibility")]
 static class HideRemoteCursors
 {
-    static void Postfix(NRemoteMouseCursorContainer __instance) => __instance.Visible = false;
+    static readonly AccessTools.FieldRef<NRemoteMouseCursorContainer, List<NRemoteMouseCursor>> Cursors =
+        AccessTools.FieldRefAccess<NRemoteMouseCursorContainer, List<NRemoteMouseCursor>>("_cursors");
+
+    static void Postfix(NRemoteMouseCursorContainer __instance)
+    {
+        if (CouchNames.HidesEveryRemoteCursor)
+        {
+            __instance.Visible = false;
+            return;
+        }
+        foreach (NRemoteMouseCursor cursor in Cursors(__instance))
+        {
+            if (CouchNames.IsCouchPeer(cursor.PlayerId))
+                cursor.Visible = false;
+        }
+    }
 }
 
 [HarmonyPatch(typeof(NRemoteMouseCursorContainer), nameof(NRemoteMouseCursorContainer._Ready))]
 static class HideRemoteCursorsOnReady
 {
-    static void Postfix(NRemoteMouseCursorContainer __instance) => __instance.Visible = false;
+    static void Postfix(NRemoteMouseCursorContainer __instance)
+    {
+        if (CouchNames.HidesEveryRemoteCursor)
+            __instance.Visible = false;
+    }
 }

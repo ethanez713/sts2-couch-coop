@@ -44,9 +44,14 @@ static class EndTurnForAll
             while (true)
             {
                 IPEndPoint? from = null;
-                if (Encoding.ASCII.GetString(udp.Receive(ref from)) == Message)
+                string text = Encoding.UTF8.GetString(udp.Receive(ref from));
+                try
                 {
-                    Callable.From(EndOwnTurn).CallDeferred();
+                    Handle(text);
+                }
+                catch (Exception e)
+                {
+                    Log.Error($"[CouchCoop] seat message: {e.Message}");
                 }
             }
         }
@@ -56,14 +61,27 @@ static class EndTurnForAll
         }
     }
 
-    public static void AskOthersToEndTurn()
+    public static void AskOthersToEndTurn() => SendToOthers(Message);
+
+    internal static void SendToOthers(string text)
     {
         using var udp = new UdpClient();
-        byte[] bytes = Encoding.ASCII.GetBytes(Message);
+        byte[] bytes = Encoding.UTF8.GetBytes(text);
         foreach (int seat in Enumerable.Range(0, MaxSeats).Where(s => s != OwnSeat))
         {
             udp.Send(bytes, bytes.Length, new IPEndPoint(IPAddress.Loopback, SeatPort(seat)));
         }
+    }
+
+    static void Handle(string text)
+    {
+        if (text == Message)
+        {
+            Callable.From(EndOwnTurn).CallDeferred();
+            return;
+        }
+        if (text.StartsWith(CouchNames.MessagePrefix, StringComparison.Ordinal))
+            CouchNames.Merge(text[CouchNames.MessagePrefix.Length..]);
     }
 
     static readonly AccessTools.FieldRef<NEndTurnButton, CombatState?> ButtonCombatState =
