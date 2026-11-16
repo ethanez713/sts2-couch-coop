@@ -167,6 +167,7 @@ static class CouchWindow
     {
         if (msg == WM_INPUT)
         {
+            long start = System.Diagnostics.Stopwatch.GetTimestamp();
             try
             {
                 SeatPointer.OnRawInput(wParam, lParam);
@@ -175,7 +176,9 @@ static class CouchWindow
             {
                 Log.Error($"[CouchCoop] raw input failed: {e.Message}");
             }
-            return DefWindowProc(hwnd, msg, wParam, lParam);
+            IntPtr result = DefWindowProc(hwnd, msg, wParam, lParam);
+            PerfLog.RawInputHandled(System.Diagnostics.Stopwatch.GetTimestamp() - start);
+            return result;
         }
         if (IsMouseMessage(msg) || msg == WM_MOUSEHOVER)
         {

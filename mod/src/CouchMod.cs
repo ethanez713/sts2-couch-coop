@@ -25,6 +25,7 @@ public static class CouchMod
         EndTurnForAll.StartListening();
         Callable.From(CouchWindow.Install).CallDeferred();
         Callable.From(WindowOwnPointer.Install).CallDeferred();
+        Callable.From(PerfLog.Install).CallDeferred();
         if (SeatPointer.Active)
         {
             Callable.From(SoftwareCursor.AdoptGameCursor).CallDeferred();

@@ -421,7 +421,7 @@ static class SeatPointer
 
     static readonly ConcurrentDictionary<IntPtr, bool> CouchWindows = new();
 
-    static bool IsCouchWindow(IntPtr hwnd) => hwnd != IntPtr.Zero && CouchWindows.GetOrAdd(hwnd, h =>
+    public static bool IsCouchWindow(IntPtr hwnd) => hwnd != IntPtr.Zero && CouchWindows.GetOrAdd(hwnd, h =>
     {
         GetWindowThreadProcessId(h, out uint pid);
         try
