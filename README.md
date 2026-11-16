@@ -70,11 +70,15 @@ never overwrite each other.
 **The host's progress is your Steam profile's progress.** Every launch copies your Steam
 profile's progress, prefs and settings into both folders. When both windows close, a hidden
 background process (`couch-saves.ps1`) copies the host's `progress.save` (unlocks, timeline,
-discoveries, stats, ascension) and new run history into the Steam profile, as online co-op
-would. Settings are not copied back. The next launch finishes any copy that was missed.
+discoveries, stats, ascension) into the Steam profile, keeping the file's cloud timestamp so
+Steam Cloud keeps it; the next normal launch uploads it. Settings are not copied back. The
+next couch launch finishes any copy that was missed.
 
+- Couch runs do not appear in the Steam profile's run history: Steam Cloud deletes local run
+  files it has no copy of, and only the game itself can upload one.
 - The copy is skipped if the Steam save changed after the couch session was seeded (you
-  played normally in between); the reason is in `logs\couch_sync.log`.
+  played normally in between); the couch progress is then kept in
+  `%LOCALAPPDATA%\sts2-couch\unsynced\`, and the reason is in `logs\couch_sync.log`.
 - The client's earnings are discarded, except co-op ascension. Each launch gives both windows
   the highest `max_multiplayer_ascension` among your Steam profile and the two couch saves,
   because the lobby caps ascension at the lowest max among its players. The lobby's chosen

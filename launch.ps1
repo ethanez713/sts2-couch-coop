@@ -87,7 +87,7 @@ function Get-Layout([int]$slot) {
 }
 
 # Each window starts from the owner's progress and settings, copied fresh on every launch.
-# The host's progress and run history flow back to the Steam profile when the game closes
+# The host's progress flows back to the Steam profile when the game closes
 # (couch-saves.ps1), and any session that ended unsynced is flushed before seeding. Player 2's
 # earnings are discarded, except co-op ascension (Merge-CoopAscension).
 function Get-ProgressInt([string]$path, [string]$field) {
@@ -147,7 +147,8 @@ Save-SeedMarker
 # networking. Both windows run with Steam off (see above). The host resumes the couch run
 # if one is saved, otherwise opens character select for a new standard run.
 $hostSave = Join-Path $userData "default\1\$couchProfile\saves\current_run_mp.save"
-$hostMode = if (Test-Path $hostSave) { "load" } else { "host_standard" }
+# The game resumes from the .backup alone when a crash cut its save off mid-rename.
+$hostMode = if ((Test-Path $hostSave) -or (Test-Path "$hostSave.backup")) { "load" } else { "host_standard" }
 
 foreach ($slot in 0..($players.Count - 1)) {
     $p = $players[$slot]
