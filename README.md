@@ -34,6 +34,8 @@ Double-click `couch-coop.bat`, or run it with names: `couch-coop.bat -Player1 Et
 - **Host window** (player 1) opens character select for a new run, or the resume lobby if a
   couch run is saved. To start over instead, abandon from the pause menu inside the run.
 - **Client window** (player 2) joins the host automatically about 20 s after launch.
+- **Save & Quit** returns both windows to the main menu. Resume by relaunching, or in place:
+  the host picks Multiplayer → Load, then the client picks Multiplayer → Join.
 - **Input mode** (`-InputMode`):
   - `mice` (default): each window follows only its own pointing device, as if on its own PC. By
     default the host takes the touchpad and the client any other mouse; choose with
