@@ -76,7 +76,7 @@ static class SeatPointer
         TellGodotMouseEntered();
         SoftwareCursor.Install(tree);
         tree.ProcessFrame += OnFrame;
-        if (EndTurnForAll.OwnSeat() == 0)
+        if (CouchMod.Seat == 0)
         {
             new Thread(ParkSystemCursor) { IsBackground = true, Name = "CouchCoop cursor park" }.Start();
         }

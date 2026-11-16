@@ -54,7 +54,7 @@ static class PerfLog
             _cpuAtReport = self.TotalProcessorTime;
             string screens = string.Join(", ", Enumerable.Range(0, DisplayServer.GetScreenCount()).Select(i =>
                 $"{i}: {DisplayServer.ScreenGetSize(i).X}x{DisplayServer.ScreenGetSize(i).Y} at {DisplayServer.ScreenGetPosition(i)} {DisplayServer.ScreenGetRefreshRate(i):0.#} Hz"));
-            Log.Info($"[CouchCoop] perf seat {EndTurnForAll.OwnSeat()} pid {self.Id} priority {self.PriorityClass}, "
+            Log.Info($"[CouchCoop] perf seat {CouchMod.Seat} pid {self.Id} priority {self.PriorityClass}, "
                      + $"{System.Environment.ProcessorCount} logical CPUs; GPU {RenderingServer.GetVideoAdapterName()} "
                      + $"(driver {string.Join(" ", OS.GetVideoAdapterDriverInfo())}, {RenderingServer.GetVideoAdapterApiVersion()}); "
                      + $"screens {screens}; report every {ReportSeconds} s, hitch = frame over {HitchMs} ms");

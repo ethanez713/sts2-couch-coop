@@ -51,7 +51,7 @@ Double-click `couch-coop.bat`, or run it with names: `couch-coop.bat -Player1 Et
 
 The launcher copies the couch mod, and in touch mode Touch-STS2, into the game's
 `mods` folder and enables mods for the couch windows only. Normal Steam play leaves them
-off, and the couch mod does nothing outside a `--fastmp` session.
+off, and the couch mod does nothing in a window the launcher did not start.
 
 - **No remote cursors:** everyone can see every screen, so the other players' cursors are hidden.
 - **Own pointer per window:** each window's game reads and moves only its own pointer, never

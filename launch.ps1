@@ -153,7 +153,7 @@ $hostMode = if ((Test-Path $hostSave) -or (Test-Path "$hostSave.backup")) { "loa
 foreach ($slot in 0..($players.Count - 1)) {
     $p = $players[$slot]
     $gameArgs = @("--force-steam", "off", "--clientId", "$($p.Id)", "--log-file", (Join-Path $logDir $p.Log),
-                  "--fastmp", $(if ($slot -eq 0) { $hostMode } else { "join" }))
+                  "--fastmp", $(if ($slot -eq 0) { $hostMode } else { "join" }), "--couch-seat", "$slot")
     if ($InputMode -eq "mice") {
         $gameArgs += @("--couch-pointer", "`"$($p.Pointer)`"",
                        "--couch-pointer-speed", $p.Speed.ToString([Globalization.CultureInfo]::InvariantCulture))

@@ -23,22 +23,15 @@ static class EndTurnForAll
 {
     const string Message = "end-turn";
     const int BasePort = 33790;
-    // The launcher's net ids, in seat order: host, then clients (fixed by the game's dev mode).
-    static readonly ulong[] SeatIds = { 1, 1000, 2000, 3000 };
+    const int MaxSeats = 4;
 
     static int SeatPort(int seat) => BasePort + seat;
 
-    public static int OwnSeat()
-    {
-        string[] args = OS.GetCmdlineArgs();
-        int i = Array.IndexOf(args, "--clientId");
-        ulong id = i >= 0 && i + 1 < args.Length && ulong.TryParse(args[i + 1], out ulong parsed) ? parsed : 1;
-        return Math.Max(0, Array.IndexOf(SeatIds, id));
-    }
+    static int OwnSeat => CouchMod.Seat ?? 0;
 
     public static void StartListening()
     {
-        int port = SeatPort(OwnSeat());
+        int port = SeatPort(OwnSeat);
         var thread = new Thread(() => Listen(port)) { IsBackground = true, Name = "CouchCoop end-turn listener" };
         thread.Start();
     }
@@ -65,10 +58,9 @@ static class EndTurnForAll
 
     public static void AskOthersToEndTurn()
     {
-        int own = OwnSeat();
         using var udp = new UdpClient();
         byte[] bytes = Encoding.ASCII.GetBytes(Message);
-        foreach (int seat in Enumerable.Range(0, SeatIds.Length).Where(s => s != own))
+        foreach (int seat in Enumerable.Range(0, MaxSeats).Where(s => s != OwnSeat))
         {
             udp.Send(bytes, bytes.Length, new IPEndPoint(IPAddress.Loopback, SeatPort(seat)));
         }
