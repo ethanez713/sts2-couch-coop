@@ -10,6 +10,9 @@ param(
     # Raw touchpad movement lacks the acceleration Windows gives its cursor, so it starts faster.
     [double]$Speed1 = 2.0,
     [double]$Speed2 = 1.0,
+    # The host opens a Steam lobby friends can join whenever Steam is running; -Offline keeps
+    # the session on this PC.
+    [switch]$Offline,
     [string]$GameDir = "C:\Program Files (x86)\Steam\steamapps\common\Slay the Spire 2"
 )
 $ErrorActionPreference = "Stop"
@@ -115,13 +118,56 @@ function Merge-CoopAscension([string[]]$couchProgress, [string]$steamProgress) {
     return @{ max = [int]$max; preferred = [Math]::Min([int]$preferred, [int]$max) }
 }
 Sync-HostProgressToSteam
+Restore-SteamSettings
 
-$couchProgress = @($players | ForEach-Object { Join-Path $userData "default\$($_.Id)\$couchProfile\saves\progress.save" })
+function Test-RunSave([string]$saves) {
+    $save = Join-Path $saves "current_run_mp.save"
+    # The game resumes from the .backup alone when a crash cut its save off mid-rename.
+    (Test-Path $save) -or (Test-Path "$save.backup")
+}
+
+# A saved run records the host's net id (1 offline, the Steam id when hosted through Steam), so
+# it resumes only in the mode that started it.
+$offlineHostSaves = Get-CouchSaves 1
+$steamHostSaves = Get-SteamHostSaves
+$steamRunning = [bool](Get-Process -Name steam -ErrorAction SilentlyContinue)
+$finishOfflineRun = (Test-RunSave $offlineHostSaves) -and -not (Test-RunSave $steamHostSaves)
+$useSteam = $steamRunning -and -not $Offline -and -not $finishOfflineRun
+if ($useSteam) {
+    Write-Host "Hosting through Steam: friends can join from the game's Multiplayer menu or your invite."
+} elseif ($steamRunning -and $finishOfflineRun -and -not $Offline) {
+    Write-Host "Resuming the couch run saved offline; friends can join from the next run."
+} elseif (-not $steamRunning -and (Test-RunSave $steamHostSaves)) {
+    Write-Warning "A Steam-hosted couch run is saved; start Steam and relaunch to resume it. Playing offline instead."
+}
+$hostSaves = if ($useSteam) { $steamHostSaves } else { $offlineHostSaves }
+
+# The offline windows load mods only from the mods folder; a Steam-on window would also load
+# every subscribed Workshop mod, so those are switched off to keep both modes identical.
+function Get-WorkshopModsOff {
+    $workshop = Join-Path $steamApps "workshop\content\2868840"
+    if (-not (Test-Path $workshop)) { return }
+    Get-ChildItem $workshop -Directory | ForEach-Object { Get-ChildItem $_.FullName -Filter *.json -File } |
+        ForEach-Object { try { (Get-Content $_.FullName -Raw | ConvertFrom-Json).id } catch { $null } } |
+        Where-Object { $_ } | Sort-Object -Unique |
+        ForEach-Object { @{ id = $_; source = "steam_workshop"; is_enabled = $false } }
+}
+
+$seatSaves = @(for ($slot = 0; $slot -lt $players.Count; $slot++) {
+    if ($slot -eq 0) { $hostSaves } else { Get-CouchSaves $players[$slot].Id }
+})
+$couchProgress = @($seatSaves | ForEach-Object { Join-Path $_ "progress.save" })
 $coopAscension = Merge-CoopAscension $couchProgress (Join-Path $steamSaves "progress.save")
 
+if ($useSteam) {
+    Backup-SteamSettings
+    # The modded profile picks its profile slot from its own profile.save.
+    New-Item -ItemType Directory -Force -Path (Join-Path $steamAccount.FullName "modded") | Out-Null
+    Copy-Item (Join-Path $steamAccount.FullName "profile.save") (Join-Path $steamAccount.FullName "modded\profile.save") -Force
+}
+
 for ($slot = 0; $slot -lt $players.Count; $slot++) {
-    $folder = Join-Path $userData "default\$($players[$slot].Id)"
-    $saves = Join-Path $folder "$couchProfile\saves"
+    $saves = $seatSaves[$slot]
     New-Item -ItemType Directory -Force -Path $saves | Out-Null
     foreach ($file in "progress.save", "prefs.save") {
         $source = Join-Path $steamSaves $file
@@ -131,34 +177,47 @@ for ($slot = 0; $slot -lt $players.Count; $slot++) {
         Set-ProgressInt $couchProgress[$slot] "max_multiplayer_ascension" $coopAscension.max
         Set-ProgressInt $couchProgress[$slot] "preferred_multiplayer_ascension" $coopAscension.preferred
     }
-    $settings = Get-Content (Join-Path $steamAccount.FullName "settings.save") -Raw | ConvertFrom-Json
+    $steamHosted = $useSteam -and $slot -eq 0
+    $settings = Get-Content $(if ($steamHosted) { $steamSettingsBackup } else { $steamSettings }) -Raw | ConvertFrom-Json
     $layout = Get-Layout $slot
     # The game caps an unfocused window at 30 FPS unless it is in a multiplayer session, but it
     # decides when focus is lost: the window that loses focus on the main menu stays capped.
     $layout.limit_fps_in_background = $false
-    $layout.mod_settings = @{ mods_enabled = $true; mod_list = @() }
+    $modList = @(if ($steamHosted) { Get-WorkshopModsOff })
+    $layout.mod_settings = @{ mods_enabled = $true; mod_list = $modList }
     foreach ($key in $layout.Keys) { $settings | Add-Member -Force -NotePropertyName $key -NotePropertyValue $layout[$key] }
-    [IO.File]::WriteAllText((Join-Path $folder "settings.save"), (ConvertTo-Json $settings -Depth 10))
+    $target = if ($steamHosted) { $steamSettings } else { Join-Path $userData "default\$($players[$slot].Id)\settings.save" }
+    [IO.File]::WriteAllText($target, (ConvertTo-Json $settings -Depth 10))
 }
 
-Save-SeedMarker
+Save-SeedMarker $hostSaves
 
-# --fastmp is the game's own loopback mode: ENet on 127.0.0.1:33771 instead of Steam
-# networking. Both windows run with Steam off (see above). The host resumes the couch run
-# if one is saved, otherwise opens character select for a new standard run.
-$hostSave = Join-Path $userData "default\1\$couchProfile\saves\current_run_mp.save"
-# The game resumes from the .backup alone when a crash cut its save off mid-rename.
-$hostMode = if ((Test-Path $hostSave) -or (Test-Path "$hostSave.backup")) { "load" } else { "host_standard" }
+# Offline, --fastmp is the game's own loopback mode: ENet on 127.0.0.1:33771 instead of Steam
+# networking, every window with Steam off (see above). Hosted through Steam, the couch mod opens
+# a Steam lobby and the same loopback port for the other couch windows (--couch-host). Either
+# way the host resumes the couch run if one is saved, otherwise opens character select for a
+# new standard run.
+$resume = Test-RunSave $hostSaves
 
 foreach ($slot in 0..($players.Count - 1)) {
     $p = $players[$slot]
-    $gameArgs = @("--force-steam", "off", "--clientId", "$($p.Id)", "--log-file", (Join-Path $logDir $p.Log),
-                  "--fastmp", $(if ($slot -eq 0) { $hostMode } else { "join" }), "--couch-seat", "$slot")
+    $gameArgs = @("--log-file", (Join-Path $logDir $p.Log), "--couch-seat", "$slot")
+    if ($slot -eq 0 -and $useSteam) {
+        $gameArgs += @("--couch-host", $(if ($resume) { "load" } else { "new" }), "--couch-seats", "$($players.Count)")
+    } else {
+        $gameArgs += @("--force-steam", "off", "--clientId", "$($p.Id)",
+                       "--fastmp", $(if ($slot -gt 0) { "join" } elseif ($resume) { "load" } else { "host_standard" }))
+        if ($useSteam) { $gameArgs += @("--couch-host-id", $steamId) }
+    }
     if ($InputMode -eq "mice") {
         $gameArgs += @("--couch-pointer", "`"$($p.Pointer)`"",
                        "--couch-pointer-speed", $p.Speed.ToString([Globalization.CultureInfo]::InvariantCulture))
     }
+    # Launching the exe directly (not through Steam) needs the app id in the environment, or
+    # SteamAPI init fails and the game quits.
+    if ($slot -eq 0 -and $useSteam) { $env:SteamAppId = "2868840" }
     Start-Process -FilePath $exe -WorkingDirectory $workDir -ArgumentList $gameArgs
+    Remove-Item Env:SteamAppId -ErrorAction SilentlyContinue
     # A client's join times out after 10 s, so the host must be listening first.
     if ($slot -eq 0) { Start-Sleep -Seconds 12 }
 }
