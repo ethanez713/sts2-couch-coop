@@ -53,6 +53,14 @@ Double-click `couch-coop.bat`, or run it with names: `couch-coop.bat -Player1 Et
     focuses it; tapping doesn't.
 - Only the focused window plays sound.
 
+## Touch in normal play, without mods
+
+Copy `override.cfg` next to `SlayTheSpire2.exe`. Without it, the game finds what is under
+the pointer from the Windows cursor, which a finger doesn't move, so dragging a card onto
+an enemy never targets it. The file makes the game use the touch position instead. It is
+an engine setting, not a mod: saves, achievements and online play are unaffected. To undo,
+delete it.
+
 ## Couch mod
 
 The launcher copies the couch mod, and in touch mode Touch-STS2, into the game's
