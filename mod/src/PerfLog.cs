@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
 using Godot;
+using HarmonyLib;
 using MegaCrit.Sts2.Core.Logging;
 
 namespace CouchCoop;
@@ -11,7 +12,8 @@ namespace CouchCoop;
 // doing, with a wall-clock time so the two windows' logs line up. A frame runs from one
 // ProcessFrame to the next and is split into logic (ProcessFrame to FramePreDraw), draw
 // (FramePreDraw to FramePostDraw, including shader pipeline compiles and present), and the rest:
-// frame pacing sleep plus OS window messages, then physics (PhysicsFrame to the next ProcessFrame).
+// C# async continuations (GodotTaskScheduler.Activate, run once a frame after drawing), frame pacing
+// sleep plus OS window messages and input dispatch, then physics (PhysicsFrame to the next ProcessFrame).
 // Long frames are also logged one by one. grep "[CouchCoop] perf" in couch_host.log and couch_client.log.
 static class PerfLog
 {
@@ -24,6 +26,8 @@ static class PerfLog
     static readonly double[] Sorted = new double[8192];
     static int _frames, _hitches, _loggedHitches;
     static long _lastFrame, _reportStart, _preDraw, _postDraw, _physicsStart;
+    static long _asyncTicks, _asyncTicksAtFrame, _asyncTicksAtReport;
+    static double _asyncMsMax;
     static double _processMsSum, _processMsMax, _drawMsSum, _drawMsMax, _restMsMax, _physicsMsMax;
     static double _renderCpuMsSum, _gpuMsSum, _gpuMsMax;
     static readonly Performance.Monitor[] PipelineMonitors =
@@ -42,6 +46,8 @@ static class PerfLog
 
     // Every WM_INPUT this window handled, and the time spent in it, on the main thread.
     static long _rawInputs, _rawInputTicks;
+
+    public static void AsyncContinuationsRan(long ticks) => _asyncTicks += ticks;
 
     public static void RawInputHandled(long ticks)
     {
@@ -105,7 +111,9 @@ static class PerfLog
         double processMs = Span(_lastFrame, _preDraw);
         double drawMs = Span(_preDraw, _postDraw);
         double physicsMs = Span(_physicsStart, now);
-        double restMs = Math.Max(0, frameMs - processMs - drawMs - physicsMs);
+        double asyncMs = Ms(_asyncTicks - _asyncTicksAtFrame);
+        _asyncTicksAtFrame = _asyncTicks;
+        double restMs = Math.Max(0, frameMs - processMs - drawMs - physicsMs - asyncMs);
         _lastFrame = now;
         _preDraw = _postDraw = _physicsStart = 0;
         var pipelines = new long[5];
@@ -122,6 +130,7 @@ static class PerfLog
         _drawMsMax = Math.Max(_drawMsMax, drawMs);
         _physicsMsMax = Math.Max(_physicsMsMax, physicsMs);
         _restMsMax = Math.Max(_restMsMax, restMs);
+        _asyncMsMax = Math.Max(_asyncMsMax, asyncMs);
         _renderCpuMsSum += renderCpuMs;
         _gpuMsSum += gpuMs;
         _gpuMsMax = Math.Max(_gpuMsMax, gpuMs);
@@ -142,7 +151,7 @@ static class PerfLog
             {
                 _loggedHitches++;
                 Log.Info($"[CouchCoop] perf {Clock()} hitch {frameMs:0} ms: process {processMs:0.0} ms, draw {drawMs:0.0} ms (render cpu {renderCpuMs:0.0} ms, "
-                         + $"gpu {gpuMs:0.0} ms), physics {physicsMs:0.0} ms, sleep and os events {restMs:0.0} ms; {PipelineDelta(pipelines, PipelinesAtFrame)}; "
+                         + $"gpu {gpuMs:0.0} ms), physics {physicsMs:0.0} ms, async {asyncMs:0.0} ms, sleep and os events {restMs:0.0} ms; {PipelineDelta(pipelines, PipelinesAtFrame)}; "
                          + $"gc {GcDelta(gc, _gcAtFrame)} pause {(gcPause - _gcPauseAtFrame).TotalMilliseconds:0.0} ms, "
                          + $"raw input {_rawInputs - _rawInputAtFrame} msgs {Ms(_rawInputTicks - _rawInputTicksAtFrame):0.0} ms, foreground {foreground}");
             }
@@ -176,7 +185,7 @@ static class PerfLog
         Log.Info($"[CouchCoop] perf {Clock()} {n / seconds:0.0} fps; frame ms avg {(n == 0 ? 0 : FrameMs.Take(n).Average()):0.0} "
                  + $"p50 {Percentile(0.5):0.0} p95 {Percentile(0.95):0.0} p99 {Percentile(0.99):0.0} max {(n == 0 ? 0 : Sorted[n - 1]):0} hitches {_hitches}; "
                  + $"process avg {_processMsSum / frames:0.0} max {_processMsMax:0.0}, draw avg {_drawMsSum / frames:0.0} max {_drawMsMax:0.0}, "
-                 + $"physics max {_physicsMsMax:0.0}, sleep and os events max {_restMsMax:0.0}, render cpu avg {_renderCpuMsSum / frames:0.0}, "
+                 + $"physics max {_physicsMsMax:0.0}, async avg {Ms(_asyncTicks - _asyncTicksAtReport) / frames:0.0} max {_asyncMsMax:0.0}, sleep and os events max {_restMsMax:0.0}, render cpu avg {_renderCpuMsSum / frames:0.0}, "
                  + $"gpu avg {_gpuMsSum / frames:0.0} max {_gpuMsMax:0.0}; {PipelineDelta(PipelinesAtFrame, PipelinesAtReport)}; "
                  + $"process cpu {(cpu - _cpuAtReport).TotalSeconds / seconds * 100:0}% of a core; "
                  + $"gc {GcDelta(gc, _gcAtReport)} pause {(gcPause - _gcPauseAtReport).TotalMilliseconds:0.0} ms heap {GC.GetTotalMemory(false) >> 20} MB; "
@@ -187,7 +196,8 @@ static class PerfLog
                  + $"vram {Performance.GetMonitor(Performance.Monitor.RenderVideoMemUsed) / (1 << 20):0} MB nodes {Performance.GetMonitor(Performance.Monitor.ObjectNodeCount):0}");
         _reportStart = now;
         _frames = _hitches = _loggedHitches = _fgSelf = _fgCouch = _fgOther = 0;
-        _processMsSum = _processMsMax = _drawMsSum = _drawMsMax = _physicsMsMax = _restMsMax = 0;
+        _processMsSum = _processMsMax = _drawMsSum = _drawMsMax = _physicsMsMax = _restMsMax = _asyncMsMax = 0;
+        _asyncTicksAtReport = _asyncTicks;
         _renderCpuMsSum = _gpuMsSum = _gpuMsMax = 0;
         PipelinesAtFrame.CopyTo(PipelinesAtReport, 0);
         _cpuAtReport = cpu;
@@ -218,4 +228,12 @@ static class PerfLog
 
     [DllImport("user32.dll")]
     static extern IntPtr GetForegroundWindow();
+}
+
+[HarmonyPatch(typeof(GodotTaskScheduler), nameof(GodotTaskScheduler.Activate))]
+static class TimeAsyncContinuations
+{
+    static void Prefix(out long __state) => __state = Stopwatch.GetTimestamp();
+
+    static void Postfix(long __state) => PerfLog.AsyncContinuationsRan(Stopwatch.GetTimestamp() - __state);
 }
