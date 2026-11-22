@@ -23,6 +23,7 @@ static class PerfLog
     static readonly double[] Sorted = new double[8192];
     static int _frames, _hitches, _loggedHitches;
     static long _lastFrame, _reportStart;
+    static double _lastProcessMs;
     static double _processMsSum, _processMsMax, _renderCpuMsSum, _gpuMsSum, _gpuMsMax;
     static int _fgSelf, _fgCouch, _fgOther;
     static IntPtr _hwnd;
@@ -64,16 +65,23 @@ static class PerfLog
         _gcAtFrame = GcCounts();
         _reportStart = _lastFrame = Stopwatch.GetTimestamp();
         tree.ProcessFrame += OnFrame;
+        RenderingServer.FramePreDraw += OnProcessEnd;
     }
 
+    // Process time is timed here rather than read from Performance.TimeProcess, which Godot updates
+    // once a second with that second's longest frame. ProcessFrame fires before any node's _Process
+    // and FramePreDraw once the frame's logic is done, so the span between them is the game logic.
+    static void OnProcessEnd() => _lastProcessMs = Stopwatch.GetElapsedTime(_lastFrame).TotalMilliseconds;
+
     // Called at the start of each frame, so the interval since the last call is the previous frame,
-    // and the engine's process and render timings describe that same frame.
+    // and the process and render timings describe that same frame.
     static void OnFrame()
     {
         long now = Stopwatch.GetTimestamp();
         double frameMs = Stopwatch.GetElapsedTime(_lastFrame, now).TotalMilliseconds;
         _lastFrame = now;
-        double processMs = Performance.GetMonitor(Performance.Monitor.TimeProcess) * 1000;
+        double processMs = _lastProcessMs;
+        _lastProcessMs = 0;
         double renderCpuMs = RenderingServer.ViewportGetMeasuredRenderTimeCpu(_viewport) + RenderingServer.GetFrameSetupTimeCpu();
         double gpuMs = RenderingServer.ViewportGetMeasuredRenderTimeGpu(_viewport);
         if (_frames < FrameMs.Length)
