@@ -8,10 +8,11 @@ using MegaCrit.Sts2.Core.Logging;
 namespace CouchCoop;
 
 // Frame timing for each couch window, written to its game log so it sits among what the game was
-// doing, with a wall-clock time so the two windows' logs line up. Every report splits a frame's
-// time into game logic, render CPU and GPU; a frame much longer than all three was waiting on
-// something outside the game (vsync, the compositor, the OS scheduler). Long frames are also
-// logged one by one. grep "[CouchCoop] perf" in couch_host.log and couch_client.log.
+// doing, with a wall-clock time so the two windows' logs line up. A frame runs from one
+// ProcessFrame to the next and is split into logic (ProcessFrame to FramePreDraw), draw
+// (FramePreDraw to FramePostDraw, including shader pipeline compiles and present), and the rest:
+// frame pacing sleep plus OS window messages, then physics (PhysicsFrame to the next ProcessFrame).
+// Long frames are also logged one by one. grep "[CouchCoop] perf" in couch_host.log and couch_client.log.
 static class PerfLog
 {
     const double ReportSeconds = 10;
@@ -22,9 +23,16 @@ static class PerfLog
     static readonly double[] FrameMs = new double[8192];
     static readonly double[] Sorted = new double[8192];
     static int _frames, _hitches, _loggedHitches;
-    static long _lastFrame, _reportStart;
-    static double _lastProcessMs;
-    static double _processMsSum, _processMsMax, _renderCpuMsSum, _gpuMsSum, _gpuMsMax;
+    static long _lastFrame, _reportStart, _preDraw, _postDraw, _physicsStart;
+    static double _processMsSum, _processMsMax, _drawMsSum, _drawMsMax, _restMsMax, _physicsMsMax;
+    static double _renderCpuMsSum, _gpuMsSum, _gpuMsMax;
+    static readonly Performance.Monitor[] PipelineMonitors =
+    {
+        Performance.Monitor.PipelineCompilationsCanvas, Performance.Monitor.PipelineCompilationsMesh,
+        Performance.Monitor.PipelineCompilationsSurface, Performance.Monitor.PipelineCompilationsDraw,
+        Performance.Monitor.PipelineCompilationsSpecialization,
+    };
+    static readonly long[] PipelinesAtFrame = new long[5], PipelinesAtReport = new long[5];
     static int _fgSelf, _fgCouch, _fgOther;
     static IntPtr _hwnd;
     static Rid _viewport;
@@ -64,14 +72,29 @@ static class PerfLog
         _gcAtReport = GcCounts();
         _gcAtFrame = GcCounts();
         _reportStart = _lastFrame = Stopwatch.GetTimestamp();
+        Pipelines(PipelinesAtFrame);
+        Pipelines(PipelinesAtReport);
         tree.ProcessFrame += OnFrame;
-        RenderingServer.FramePreDraw += OnProcessEnd;
+        tree.PhysicsFrame += () => { if (_physicsStart == 0) _physicsStart = Stopwatch.GetTimestamp(); };
+        RenderingServer.FramePreDraw += () => _preDraw = Stopwatch.GetTimestamp();
+        RenderingServer.FramePostDraw += () => _postDraw = Stopwatch.GetTimestamp();
     }
 
-    // Process time is timed here rather than read from Performance.TimeProcess, which Godot updates
-    // once a second with that second's longest frame. ProcessFrame fires before any node's _Process
-    // and FramePreDraw once the frame's logic is done, so the span between them is the game logic.
-    static void OnProcessEnd() => _lastProcessMs = Stopwatch.GetElapsedTime(_lastFrame).TotalMilliseconds;
+    // Logic is timed with signals rather than read from Performance.TimeProcess, which Godot updates
+    // once a second with that second's longest frame.
+    static double Span(long from, long to) => from == 0 || to < from ? 0 : Stopwatch.GetElapsedTime(from, to).TotalMilliseconds;
+
+    static void Pipelines(long[] into)
+    {
+        for (int i = 0; i < PipelineMonitors.Length; i++)
+        {
+            into[i] = (long)Performance.GetMonitor(PipelineMonitors[i]);
+        }
+    }
+
+    static string PipelineDelta(long[] now, long[] before) =>
+        $"pipelines compiled canvas +{now[0] - before[0]} mesh +{now[1] - before[1]} surface +{now[2] - before[2]} "
+        + $"draw +{now[3] - before[3]} specialization +{now[4] - before[4]}";
 
     // Called at the start of each frame, so the interval since the last call is the previous frame,
     // and the process and render timings describe that same frame.
@@ -79,9 +102,14 @@ static class PerfLog
     {
         long now = Stopwatch.GetTimestamp();
         double frameMs = Stopwatch.GetElapsedTime(_lastFrame, now).TotalMilliseconds;
+        double processMs = Span(_lastFrame, _preDraw);
+        double drawMs = Span(_preDraw, _postDraw);
+        double physicsMs = Span(_physicsStart, now);
+        double restMs = Math.Max(0, frameMs - processMs - drawMs - physicsMs);
         _lastFrame = now;
-        double processMs = _lastProcessMs;
-        _lastProcessMs = 0;
+        _preDraw = _postDraw = _physicsStart = 0;
+        var pipelines = new long[5];
+        Pipelines(pipelines);
         double renderCpuMs = RenderingServer.ViewportGetMeasuredRenderTimeCpu(_viewport) + RenderingServer.GetFrameSetupTimeCpu();
         double gpuMs = RenderingServer.ViewportGetMeasuredRenderTimeGpu(_viewport);
         if (_frames < FrameMs.Length)
@@ -90,6 +118,10 @@ static class PerfLog
         }
         _processMsSum += processMs;
         _processMsMax = Math.Max(_processMsMax, processMs);
+        _drawMsSum += drawMs;
+        _drawMsMax = Math.Max(_drawMsMax, drawMs);
+        _physicsMsMax = Math.Max(_physicsMsMax, physicsMs);
+        _restMsMax = Math.Max(_restMsMax, restMs);
         _renderCpuMsSum += renderCpuMs;
         _gpuMsSum += gpuMs;
         _gpuMsMax = Math.Max(_gpuMsMax, gpuMs);
@@ -109,13 +141,15 @@ static class PerfLog
             if (frameMs > LoggedHitchMs && _loggedHitches < MaxLoggedHitchesPerReport)
             {
                 _loggedHitches++;
-                Log.Info($"[CouchCoop] perf {Clock()} hitch {frameMs:0} ms: process {processMs:0.0} ms, render cpu {renderCpuMs:0.0} ms, "
-                         + $"gpu {gpuMs:0.0} ms, gc {GcDelta(gc, _gcAtFrame)} pause {(gcPause - _gcPauseAtFrame).TotalMilliseconds:0.0} ms, "
+                Log.Info($"[CouchCoop] perf {Clock()} hitch {frameMs:0} ms: process {processMs:0.0} ms, draw {drawMs:0.0} ms (render cpu {renderCpuMs:0.0} ms, "
+                         + $"gpu {gpuMs:0.0} ms), physics {physicsMs:0.0} ms, sleep and os events {restMs:0.0} ms; {PipelineDelta(pipelines, PipelinesAtFrame)}; "
+                         + $"gc {GcDelta(gc, _gcAtFrame)} pause {(gcPause - _gcPauseAtFrame).TotalMilliseconds:0.0} ms, "
                          + $"raw input {_rawInputs - _rawInputAtFrame} msgs {Ms(_rawInputTicks - _rawInputTicksAtFrame):0.0} ms, foreground {foreground}");
             }
         }
         _gcAtFrame = gc;
         _gcPauseAtFrame = gcPause;
+        pipelines.CopyTo(PipelinesAtFrame, 0);
         _rawInputAtFrame = _rawInputs;
         _rawInputTicksAtFrame = _rawInputTicks;
 
@@ -141,8 +175,9 @@ static class PerfLog
         int frames = Math.Max(1, n);
         Log.Info($"[CouchCoop] perf {Clock()} {n / seconds:0.0} fps; frame ms avg {(n == 0 ? 0 : FrameMs.Take(n).Average()):0.0} "
                  + $"p50 {Percentile(0.5):0.0} p95 {Percentile(0.95):0.0} p99 {Percentile(0.99):0.0} max {(n == 0 ? 0 : Sorted[n - 1]):0} hitches {_hitches}; "
-                 + $"process avg {_processMsSum / frames:0.0} max {_processMsMax:0.0}, render cpu avg {_renderCpuMsSum / frames:0.0}, "
-                 + $"gpu avg {_gpuMsSum / frames:0.0} max {_gpuMsMax:0.0}; "
+                 + $"process avg {_processMsSum / frames:0.0} max {_processMsMax:0.0}, draw avg {_drawMsSum / frames:0.0} max {_drawMsMax:0.0}, "
+                 + $"physics max {_physicsMsMax:0.0}, sleep and os events max {_restMsMax:0.0}, render cpu avg {_renderCpuMsSum / frames:0.0}, "
+                 + $"gpu avg {_gpuMsSum / frames:0.0} max {_gpuMsMax:0.0}; {PipelineDelta(PipelinesAtFrame, PipelinesAtReport)}; "
                  + $"process cpu {(cpu - _cpuAtReport).TotalSeconds / seconds * 100:0}% of a core; "
                  + $"gc {GcDelta(gc, _gcAtReport)} pause {(gcPause - _gcPauseAtReport).TotalMilliseconds:0.0} ms heap {GC.GetTotalMemory(false) >> 20} MB; "
                  + $"raw input {(_rawInputs - _rawInputAtReport) / seconds:0}/s {Ms(_rawInputTicks - _rawInputTicksAtReport) / seconds:0.00} ms/s; "
@@ -152,7 +187,9 @@ static class PerfLog
                  + $"vram {Performance.GetMonitor(Performance.Monitor.RenderVideoMemUsed) / (1 << 20):0} MB nodes {Performance.GetMonitor(Performance.Monitor.ObjectNodeCount):0}");
         _reportStart = now;
         _frames = _hitches = _loggedHitches = _fgSelf = _fgCouch = _fgOther = 0;
-        _processMsSum = _processMsMax = _renderCpuMsSum = _gpuMsSum = _gpuMsMax = 0;
+        _processMsSum = _processMsMax = _drawMsSum = _drawMsMax = _physicsMsMax = _restMsMax = 0;
+        _renderCpuMsSum = _gpuMsSum = _gpuMsMax = 0;
+        PipelinesAtFrame.CopyTo(PipelinesAtReport, 0);
         _cpuAtReport = cpu;
         _gcAtReport = gc;
         _gcPauseAtReport = gcPause;
