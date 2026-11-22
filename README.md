@@ -39,6 +39,8 @@ Double-click `couch-coop.bat`, or run it with names: `couch-coop.bat -Player1 Et
   pick Multiplayer → Join in their game. Up to four players in all. Without Steam, or with
   `-Offline`, the session stays on this PC. A saved run resumes in the mode it started in,
   so a run begun offline is finished offline.
+- **Renderer** (`-Renderer d3d12|vulkan|opengl3`): passes the game's `--rendering-driver`;
+  left out, the game picks its default.
 - **Client window** (player 2) joins the host automatically about 20 s after launch.
 - **Save & Quit** returns both windows to the main menu. Resume by relaunching, or in place:
   the host picks Multiplayer → Load, then the client picks Multiplayer → Join.

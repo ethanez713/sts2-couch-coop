@@ -13,6 +13,8 @@ param(
     # The host opens a Steam lobby friends can join whenever Steam is running; -Offline keeps
     # the session on this PC.
     [switch]$Offline,
+    # Empty keeps the game's default (Direct3D 12 here).
+    [ValidateSet("", "d3d12", "vulkan", "opengl3")] [string]$Renderer = "",
     [string]$GameDir = "C:\Program Files (x86)\Steam\steamapps\common\Slay the Spire 2"
 )
 $ErrorActionPreference = "Stop"
@@ -209,6 +211,7 @@ foreach ($slot in 0..($players.Count - 1)) {
                        "--fastmp", $(if ($slot -gt 0) { "join" } elseif ($resume) { "load" } else { "host_standard" }))
         if ($useSteam) { $gameArgs += @("--couch-host-id", $steamId) }
     }
+    if ($Renderer) { $gameArgs += @("--rendering-driver", $Renderer) }
     if ($InputMode -eq "mice") {
         $gameArgs += @("--couch-pointer", "`"$($p.Pointer)`"",
                        "--couch-pointer-speed", $p.Speed.ToString([Globalization.CultureInfo]::InvariantCulture))
