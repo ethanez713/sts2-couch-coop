@@ -111,7 +111,8 @@ next couch launch finishes any copy that was missed.
 - Offline couch runs earn no Steam achievements.
 
 Player names live in `%LOCALAPPDATA%\sts2-couch\mp_names.json`, which the launcher writes.
-Logs: `%APPDATA%\SlayTheSpire2\logs\couch_host.log` and `couch_client.log`. Each window's frame timing
+Logs: `%APPDATA%\SlayTheSpire2\logs\couch_host.log` and `couch_client.log`; the last 10 sessions'
+logs are kept in `logs\couch-history\`. Each window's frame timing
 is in its log on the lines starting `[CouchCoop] perf`, with wall-clock times to line the two up.
 
 ## Limits

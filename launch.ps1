@@ -201,6 +201,16 @@ Save-SeedMarker $hostSaves
 # new standard run.
 $resume = Test-RunSave $hostSaves
 
+# --log-file turns off Godot's own log rotation, so each launch would overwrite the last session.
+$historyDir = Join-Path $logDir "couch-history"
+$lastLogs = $players | ForEach-Object { Join-Path $logDir $_.Log } | Where-Object { Test-Path $_ }
+if ($lastLogs) {
+    $stamp = (Get-Item $lastLogs[0]).LastWriteTime.ToString("yyyy-MM-ddTHH.mm.ss")
+    $to = New-Item -ItemType Directory -Force -Path (Join-Path $historyDir $stamp)
+    $lastLogs | Move-Item -Destination $to -Force
+    Get-ChildItem $historyDir -Directory | Sort-Object Name -Descending | Select-Object -Skip 10 | Remove-Item -Recurse -Force
+}
+
 foreach ($slot in 0..($players.Count - 1)) {
     $p = $players[$slot]
     $gameArgs = @("--log-file", (Join-Path $logDir $p.Log), "--couch-seat", "$slot")
